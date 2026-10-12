@@ -113,3 +113,16 @@ test('a sealed backup restores a game after a restart, and tampering is rejected
   assert.equal(Rooms.seatOf(back, tok(2)), Rooms.seatOf(room, tok(2)), 'everyone keeps their seat');
   assert.equal(Rooms.restoreRoom(unseal(sealed)), back, 'a second copy does not overwrite a running room');
 });
+
+test('the creator stays host through refreshes and disconnects', () => {
+  const room = lobbyWith(['Creator', 'Ali', 'Sara']);
+  Rooms.connected(room, tok(1), +1);
+  Rooms.connected(room, tok(2), +1);
+  Rooms.connected(room, tok(1), -1); // creator refreshes / drops out
+  assert.equal(room.hostToken, tok(1));
+  assert.equal(Rooms.lobby(room, tok(2), { type: 'start' }), false, 'others cannot start meanwhile');
+  Rooms.join(room, tok(1), 'Creator');
+  Rooms.connected(room, tok(1), +1);
+  assert.equal(Rooms.viewFor(room, tok(1)).room.you.host, true);
+  assert.equal(Rooms.lobby(room, tok(1), { type: 'start' }), true);
+});

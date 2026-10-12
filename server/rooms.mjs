@@ -66,7 +66,7 @@ export function join(room, token, name) {
   } else if (name) {
     m.name = cleanName(name);
   }
-  if (!room.hostToken || !room.members.has(room.hostToken)) room.hostToken = token;
+  if (!room.hostToken) room.hostToken = token; // the room's creator, permanently
   return m;
 }
 
@@ -254,12 +254,8 @@ export function connected(room, token, delta) {
   const m = room.members.get(token);
   if (!m) return;
   m.connected = Math.max(0, m.connected + delta);
-  // If the host leaves, hand hosting to someone who is still here.
-  const host = room.members.get(room.hostToken);
-  if (!host || host.connected === 0) {
-    const next = [...room.members.values()].sort((a, b) => a.joined - b.joined).find((x) => x.connected > 0);
-    if (next) room.hostToken = next.token;
-  }
+  // The host never changes: whoever created the room stays host, even while
+  // they refresh or drop out. Their seat and host role wait for them.
   changed(room);
 }
 
