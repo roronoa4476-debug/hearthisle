@@ -1,4 +1,4 @@
-/* Hearthisle v0.3 — bright honey-oak table. Layout, materials and pieces.
+/* Koolkatan — bright honey-oak table. Layout, materials and pieces.
    Artwork file URLs live in art.css. */
 :root {
   --ink: #3b2412;
@@ -187,7 +187,7 @@ h1, h2, h3, p { margin: 0; }
 /* ---------- table & board ---------- */
 #table { position: relative; min-width: 0; min-height: 0; display: grid; place-items: center; }
 #frame {
-  padding: 14px; border-radius: 18px;
+  padding: 14px; border-radius: 18px; min-width: 0; min-height: 0;
   background-color: #dba868;
   background-image: linear-gradient(135deg, rgba(255, 246, 225, 0.35), rgba(120, 70, 28, 0.08)), var(--art-oak);
   background-size: 100% 100%, 800px 400px; background-blend-mode: normal, multiply;
@@ -195,12 +195,27 @@ h1, h2, h3, p { margin: 0; }
     inset 0 2px 0 rgba(255, 250, 235, 0.8), inset 0 -3px 0 rgba(120, 70, 28, 0.45), inset 0 0 0 1px rgba(110, 62, 24, 0.55),
     0 4px 0 #9a6430, 0 14px 30px rgba(70, 36, 10, 0.35);
 }
-#board {
-  position: relative; container-type: inline-size;
-  border-radius: 10px; overflow: hidden;
+#map-viewport {
+  position: relative; width: 100%; height: 100%;
+  border-radius: 10px; overflow: clip;
   background-color: #2f97d4; background-image: var(--art-sea); background-size: 300px;
   box-shadow: inset 0 0 0 2px rgba(20, 70, 110, 0.6), inset 0 6px 18px rgba(10, 50, 90, 0.35);
+  touch-action: none;
 }
+#board { position: absolute; left: 50%; top: 50%; container-type: inline-size; transform-origin: center; }
+#map-viewport.zoomed { cursor: grab; }
+#map-viewport.dragging { cursor: grabbing; user-select: none; }
+.map-controls {
+  position: absolute; z-index: 4; bottom: 10px; left: 10px; display: flex; align-items: center; gap: 3px;
+  padding: 4px; border: 1px solid #b4976d; border-radius: 9px; background: #fff8e8;
+  box-shadow: 0 2px 6px rgba(40, 40, 30, 0.2); cursor: default;
+}
+.map-controls button { min-width: 30px; height: 30px; border: 0; border-radius: 5px; background: #f1e4cb; font-size: 20px; line-height: 1; }
+.map-controls button:hover:enabled { background: #e4cfaa; }
+.map-controls button:disabled { opacity: 0.4; }
+.map-controls #map-reset { font-size: 12px; font-weight: 900; padding: 0 7px; }
+.map-controls output { min-width: 42px; text-align: center; font-size: 11px; }
+#map-help { position: absolute; right: 10px; bottom: 12px; max-width: 40%; font-size: 10px; padding: 3px 6px; border-radius: 5px; background: #fff8e8; color: #674e38; pointer-events: none; }
 #board > *, .layer > * { position: absolute; }
 .layer { inset: 0; pointer-events: none; }
 .layer > button, .layer > .stop { pointer-events: auto; }
@@ -277,15 +292,15 @@ h1, h2, h3, p { margin: 0; }
 .hand-head small { font-family: var(--font-ui); font-size: 12px; font-weight: 800; color: var(--ink-soft); margin-left: auto; text-shadow: none; }
 .cards { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
 .rcard {
-  position: relative; height: 84px; border: 0; padding: 0; border-radius: 9px; overflow: hidden;
+  position: relative; height: 84px; border: 1px solid #d6c29b; padding: 4px 3px 0; border-radius: 9px; overflow: hidden;
   display: flex; flex-direction: column; align-items: center;
-  background: #fffaf0;
-  box-shadow: inset 0 0 0 1px rgba(70, 36, 10, 0.35), 0 2px 0 rgba(110, 62, 24, 0.45), 0 4px 8px rgba(70, 36, 10, 0.2);
+  background: #fff8e8;
+  box-shadow: inset 0 0 0 2px #fffaf0, 0 2px 0 rgba(110, 62, 24, 0.25), 0 3px 6px rgba(70, 36, 10, 0.1);
   transition: transform 0.12s;
 }
-.rcard-top { width: 100%; flex: 1; display: grid; place-items: center; background: var(--rc); box-shadow: inset 0 -2px 0 rgba(0, 0, 0, 0.12), inset 0 0 0 3px rgba(255, 255, 255, 0.35); }
-.rcard-top .icon { width: 44px; height: 44px; filter: drop-shadow(0 1px 0 rgba(255, 255, 255, 0.5)); }
-.rcard-name { font-size: 11.5px; font-weight: 900; padding: 3px 0 4px; line-height: 1; color: #4a3020; }
+.rcard-top { width: 100%; flex: 1; display: grid; place-items: center; }
+.rcard-top .icon { width: 48px; height: 48px; }
+.rcard-name { font-family: var(--font-display); font-size: 11.5px; font-weight: 400; padding: 3px 0 6px; line-height: 1; color: #4a3020; }
 .rcard-n {
   position: absolute; top: 5px; right: 5px; min-width: 26px; height: 26px; padding: 0 6px; border-radius: 13px;
   display: grid; place-items: center; font-size: 15px; font-weight: 900; color: #3b2412;
@@ -377,19 +392,28 @@ h1, h2, h3, p { margin: 0; }
 
 /* ---------- development cards ---------- */
 #devs { flex: 1; display: flex; flex-direction: column; gap: 7px; overflow: hidden; }
+#devs > .panel-title { margin-bottom: 0; }
 .buy { display: flex; align-items: center; gap: 8px; }
 .buy .btn { flex: 1; }
 .buy .cost .icon { width: 17px; height: 17px; }
-.dev-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; overflow: hidden; }
-.dev {
-  display: grid; grid-template-columns: 30px 1fr; grid-template-rows: auto auto; gap: 0 6px; align-items: center;
-  padding: 6px 7px; border-radius: 9px; background: #f6efff; box-shadow: inset 0 0 0 1.5px #8e5ad6, 0 2px 0 rgba(80, 40, 140, 0.35);
+.dev-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.dev-card {
+  display: flex; flex-direction: column; align-items: center; gap: 3px; min-width: 0;
+  padding: 6px; border: 1px solid #d6c29b; border-radius: 9px; background: #fff8e8;
+  box-shadow: inset 0 0 0 2px #fffaf0, 0 2px 0 rgba(110, 62, 24, 0.2);
+  text-align: center;
 }
-.dev .icon { grid-row: span 2; width: 30px; height: 30px; }
-.dev b { font-size: 12px; font-weight: 900; line-height: 1.1; }
-.dev .btn { min-height: 24px; height: 24px; padding: 0 8px; font-size: 11.5px; border-radius: 6px; justify-self: start; }
-.dev small { font-size: 10.5px; font-weight: 800; color: #6a4e90; line-height: 1.2; }
-.dev.dev-vp { background: #fff6d6; box-shadow: inset 0 0 0 1.5px #d4a12c, 0 2px 0 rgba(140, 100, 20, 0.35); }
+.dev-art { position: relative; display: grid; place-items: center; width: 100%; }
+.dev-card .icon { width: 60px; height: 60px; }
+.dev-count { position: absolute; top: 0; right: 0; padding: 1px 4px; border: 1px solid #d6c29b; border-radius: 8px; background: #fffaf0; font-size: 10px; }
+.dev-name { display: grid; place-items: center; min-height: 26px; font-family: var(--font-display); font-weight: 400; font-size: 12px; line-height: 1.1; }
+.dev-description { font-size: 10.5px; font-weight: 700; line-height: 1.2; color: #674e38; }
+.dev-action { display: grid; place-items: center; min-height: 24px; margin-top: auto; padding-top: 2px; }
+.dev-card .btn { min-height: 24px; height: 24px; padding: 0 8px; font-size: 11.5px; border-radius: 6px; justify-self: start; }
+.dev-card small { font-size: 10.5px; font-weight: 800; color: #6e4a2a; line-height: 1.2; }
+.dev-card.dev-vp { border-color: #d4b35d; background: #fff6d6; }
+.dev-pages { display: flex; align-items: center; justify-content: center; gap: 10px; font-size: 11px; }
+.dev-page { width: 32px; height: 24px; border: 1px solid #d6c29b; border-radius: 6px; background: #fff8e8; font-size: 20px; line-height: 1; }
 
 /* ---------- modals ---------- */
 .shade { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; background: rgba(60, 34, 12, 0.42); }
@@ -436,6 +460,8 @@ h1, h2, h3, p { margin: 0; }
   .die { width: 38px; height: 38px; padding: 5px; }
   .die i { width: 6px; height: 6px; }
   .chip .icon { width: 22px; height: 22px; }
+  .dev-card .icon { width: 42px; height: 42px; }
+  .dev-name { min-height: 24px; font-size: 11.5px; }
   #frame { padding: 10px; }
 }
 
@@ -505,8 +531,6 @@ input[type='text']:focus { outline: none; box-shadow: inset 0 1px 3px rgba(110, 
 body.busy #board .layer button, body.busy #dock button, body.busy #right button { pointer-events: none; }
 /* dev cards keep their natural height instead of being squashed by the panel */
 .dev-list { flex-shrink: 0; align-content: start; }
-.dev { align-items: start; }
-.dev .icon { align-self: center; }
 
 /* ---------- mid-game seat controls ---------- */
 .seat-btn {

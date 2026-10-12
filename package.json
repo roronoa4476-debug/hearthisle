@@ -1,9 +1,9 @@
 {
-  "name": "hearthisle",
-  "version": "0.4.0",
+  "name": "koolkatan",
+  "version": "0.5.0",
   "private": true,
   "type": "module",
-  "description": "Hearthisle: a Catan-style island board game for 3–6 players with free online rooms.",
+  "description": "Koolkatan: an island board game for 3–6 players with free online rooms.",
   "engines": {
     "node": ">=22.13.0"
   },

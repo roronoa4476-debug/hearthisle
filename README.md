@@ -1,12 +1,14 @@
-# Hearthisle
+# Koolkatan
+
+Version **0.5.0** adds new resource and development-card artwork, readable development-card descriptions with paging, a slightly larger map with zoom and dragging, and the Koolkatan name.
 
 **A Catan-style island board game I built for the browser**, so my friends and I can play together for free.
 
 Settle an island, roll for resources, trade with each other and the bank, build roads, settlements and cities, and race to 10 victory points. It plays by the classic base-game rules for 3–4 players and the 5–6 player extension, on a bright, hand-drawn, honey-oak tabletop.
 
-![Hearthisle game table](docs/screenshot.png)
+![Koolkatan game table](docs/screenshot.png)
 
-> Hearthisle is a fan-made hobby project inspired by the board game *Catan*. It is not affiliated with or endorsed by Catan GmbH or its publishers. All artwork, icons and pieces in this repository are original.
+> Koolkatan is a fan-made hobby project inspired by the board game *Catan*. It is not affiliated with or endorsed by Catan GmbH or its publishers. All artwork, icons and pieces in this repository are original.
 
 ## What's in it
 
@@ -14,7 +16,8 @@ Settle an island, roll for resources, trade with each other and the bank, build 
 - **Correct turn flow:** snake-order opening placements, discarding half on a 7, piece limits (15 roads, 5 settlements, 4 cities), and the paired turns used for 5–6 players.
 - **Trading:** bank and harbour ratios (4:1, 3:1, 2:1), plus offers between players with accept, decline and counteroffer.
 - **One screen, no scrolling:** the board, your hand, the bank, players, trading and dev cards all fit at once, down to a 1280×720 laptop.
-- **Original art:** illustrated terrain tiles, detailed resource icons, and wooden pieces in six colours (Red, Blue, White, Orange, Green, Purple). Each colour also has its own symbol so nobody gets mixed up.
+- **Map zoom:** use +/− or the mouse wheel to zoom, drag the enlarged map, and press Fit to show the full island. Keyboard controls: +/−, arrow keys, Home or 0.
+- **Original art:** illustrated terrain tiles, minimal resource and development-card emblems, and wooden pieces in six colours (Red, Blue, White, Orange, Green, Purple). Each colour also has its own symbol so nobody gets mixed up. Development cards show their description below the artwork, with two types per page.
 - **Online rooms:** create a room, send the link, and everyone plays from their own computer (a laptop or desktop works best for now). Each player picks one of six colours (a colour can't be taken twice), or joins as a spectator. Refreshing the page puts you back in your seat.
 - **Fair hidden hands:** the server runs the game and only ever sends you your own cards. Everyone else's hands are just counts, and private moments (the card you drew, what was stolen) are only told to the people involved.
 
@@ -65,8 +68,9 @@ Plain HTML, CSS and JavaScript modules with a small Node server: no frameworks. 
 | `public/js/view.js` | Draws the game from one seat's point of view. |
 | `public/js/pieces.js` | The wooden roads, settlements, cities and robber, drawn per player colour. |
 | `public/js/main.js` | Connects to the room, sends your moves, and redraws when the server updates. |
+| `public/js/map-view.js` | Fits the map and handles local zoom, dragging, and keyboard controls. |
 | `public/css/art.css` | The only file that points at artwork, so the art can be swapped without touching the code. |
-| `public/art/` | Terrain tiles, wood, sea and paper textures, and icons (all SVG). |
+| `public/art/` | Terrain tiles, wood, sea and paper textures, and SVG/PNG icons. |
 | `server.mjs` | Serves the game and runs the WebSocket connection, with a strict content security policy. |
 | `server/rooms.mjs` | Rooms, colour picking, spectators, turn checks, and hiding other players' hands. |
 | `server/snapshots.mjs` | Sealed game backups that let a game survive a server restart. |

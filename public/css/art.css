@@ -16,13 +16,13 @@
 .t-mountains { background-image: url('../art/mountains.svg'); }
 .t-desert { background-image: url('../art/desert.svg'); }
 
-.i-wood { background-image: url('../art/icons/wood.svg'); }
-.i-brick { background-image: url('../art/icons/brick.svg'); }
-.i-wheat { background-image: url('../art/icons/wheat.svg'); }
-.i-sheep { background-image: url('../art/icons/sheep.svg'); }
-.i-ore { background-image: url('../art/icons/ore.svg'); }
-.i-knight { background-image: url('../art/icons/knight.svg'); }
-.i-roads { background-image: url('../art/icons/roads.svg'); }
-.i-plenty { background-image: url('../art/icons/plenty.svg'); }
-.i-monopoly { background-image: url('../art/icons/monopoly.svg'); }
-.i-vp { background-image: url('../art/icons/vp.svg'); }
+.i-wood { background-image: url('../art/icons/wood-emblem.png'); }
+.i-brick { background-image: url('../art/icons/brick-emblem.png'); }
+.i-wheat { background-image: url('../art/icons/wheat-emblem.png'); }
+.i-sheep { background-image: url('../art/icons/sheep-emblem.png'); }
+.i-ore { background-image: url('../art/icons/ore-emblem.png'); }
+.i-knight { background-image: url('../art/icons/knight-emblem.png'); }
+.i-roads { background-image: url('../art/icons/roads-emblem.png'); }
+.i-plenty { background-image: url('../art/icons/plenty-emblem.png'); }
+.i-monopoly { background-image: url('../art/icons/monopoly-emblem.png'); }
+.i-vp { background-image: url('../art/icons/vp-emblem.png'); }

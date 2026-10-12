@@ -3,6 +3,7 @@
 import * as R from './rules.js';
 import { getGeometry } from './geometry.js';
 import { render } from './view.js';
+import { createMapView } from './map-view.js';
 
 const store = {
   get(key) { try { return localStorage.getItem(key); } catch { return null; } },
@@ -38,6 +39,7 @@ const ui = {
   codeDraft: '',
   copied: false,
   tradeTab: 'bank',
+  devPage: 0,
   give: R.emptyRes(),
   get: R.emptyRes(),
   discard: R.emptyRes(),
@@ -47,16 +49,19 @@ const ui = {
 const timers = {};
 
 /* ---------- drawing ---------- */
+const mapView = createMapView({
+  table: document.getElementById('table'),
+  frame: document.getElementById('frame'),
+  viewport: document.getElementById('map-viewport'),
+  board: document.getElementById('board'),
+  zoomIn: document.getElementById('map-zoom-in'),
+  zoomOut: document.getElementById('map-zoom-out'),
+  reset: document.getElementById('map-reset'),
+  label: document.getElementById('map-zoom-label'),
+});
 function fitBoard() {
-  const table = document.getElementById('table');
-  const frame = document.getElementById('frame');
-  const board = document.getElementById('board');
   const geo = getGeometry((game || preview).playerCount);
-  const ratio = geo.width / geo.height;
-  const pad = parseFloat(getComputedStyle(frame).paddingLeft) * 2;
-  const w = Math.max(200, Math.min(table.clientWidth - pad - 4, (table.clientHeight - pad - 4) * ratio));
-  board.style.width = `${w}px`;
-  board.style.height = `${w / ratio}px`;
+  mapView.resize(geo.width / geo.height, `${room?.code || 'preview'}|${room?.phase || 'home'}|${(game || preview).playerCount}`);
 }
 function draw() {
   let g = game || preview;

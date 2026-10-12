@@ -1,4 +1,4 @@
-// Hearthisle server: serves the game files and runs online rooms over WebSockets.
+// Koolkatan server: serves the game files and runs online rooms over WebSockets.
 // Locally: http://localhost:5174 (or $PORT). On a host such as Render it listens
 // on the port the host provides.
 
@@ -211,6 +211,6 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   process.on('unhandledRejection', (err) => console.error('unhandled', err));
   const port = Number(process.env.PORT) || 5174;
   createApp().listen(port, '0.0.0.0', () => {
-    console.log(`Hearthisle is running at http://localhost:${port}`);
+    console.log(`Koolkatan is running at http://localhost:${port}`);
   });
 }

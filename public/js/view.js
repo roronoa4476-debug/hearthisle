@@ -359,29 +359,37 @@ function renderTrade(g, a, ui, me) {
   $('trade').replaceChildren(...content);
 }
 
-function renderDevs(g, a, me) {
+function renderDevs(g, a, ui, me) {
   if (me === null) {
     $('devs').replaceChildren(panelTitle('Development cards', h('small', { text: `${g.deck.length} in deck` })), h('p', { class: 'muted', text: 'You are watching this game. Players’ cards stay hidden.' }));
     return;
   }
   const pl = g.players[me];
   const mine = me === g.cur;
-  const cards = R.DEV_TYPES.flatMap((type) => {
+  const owned = R.DEV_TYPES.filter((type) => pl.dev.some((c) => c.type === type));
+  const pages = Math.ceil(owned.length / 2);
+  const page = Math.min(Math.max(0, Math.floor(ui.devPage || 0)), Math.max(0, pages - 1));
+  const cards = owned.slice(page * 2, page * 2 + 2).map((type) => {
     const list = pl.dev.filter((c) => c.type === type);
-    if (!list.length) return [];
     const playable = mine && R.canPlayDev(g, type);
     const note = type === 'vp' ? 'Hidden point' : !mine ? 'On your turn' : list.every((c) => c.turn >= g.turn) ? 'Next turn' : g.devPlayed ? 'One per turn' : 'Not now';
-    return [h('div', { class: `dev${type === 'vp' ? ' dev-vp' : ''}`, title: R.DEV_TEXT[type] },
-      icon(type),
-      h('b', { text: `${R.DEV_NAME[type]}${list.length > 1 ? ` ×${list.length}` : ''}` }),
-      playable ? btn('Play', () => a.playDevCard(type), { class: 'btn small' }) : h('small', { text: note }),
-    )];
+    return h('article', { class: `dev-card${type === 'vp' ? ' dev-vp' : ''}`, 'aria-label': R.DEV_NAME[type] },
+      h('div', { class: 'dev-art' }, icon(type), list.length > 1 ? h('span', { class: 'dev-count', text: `×${list.length}`, 'aria-label': `${list.length} cards` }) : null),
+      h('h3', { class: 'dev-name', text: R.DEV_NAME[type] }),
+      h('p', { class: 'dev-description', text: R.DEV_TEXT[type] }),
+      h('div', { class: 'dev-action' }, playable ? btn('Play', () => a.playDevCard(type), { class: 'btn small', 'aria-label': `Play ${R.DEV_NAME[type]}` }) : h('small', { text: note })),
+    );
   });
   const canBuy = mine && R.tradeOpen(g) && g.deck.length > 0 && R.afford(pl.res, R.COST.dev);
   $('devs').replaceChildren(
     panelTitle('Development cards', h('small', { text: `${g.deck.length} in deck` })),
     h('div', { class: 'buy' }, btn('Buy a card', a.buyDevCard, { class: 'btn small wood', disabled: !canBuy, title: `Costs ${R.costText(R.COST.dev)}` }), costIcons(R.COST.dev)),
     cards.length ? h('div', { class: 'dev-list' }, cards) : h('p', { class: 'muted', text: 'No cards yet. They give knights, free roads, resources or hidden points.' }),
+    ...(pages > 1 ? [h('nav', { class: 'dev-pages', 'aria-label': 'Your development cards' },
+      btn('‹', () => a.ui({ devPage: (page + pages - 1) % pages }), { class: 'dev-page', 'aria-label': 'Previous development cards' }),
+      h('span', { text: `${page + 1} / ${pages}`, 'aria-live': 'polite' }),
+      btn('›', () => a.ui({ devPage: (page + 1) % pages }), { class: 'dev-page', 'aria-label': 'Next development cards' }),
+    )] : []),
   );
 }
 
@@ -453,7 +461,7 @@ const inviteLink = (room) => `${location.origin}/?room=${room.code}`;
 function nameField(ui, a, label = 'Your name') {
   return h('label', { class: 'field' },
     h('span', { text: label }),
-    h('input', { type: 'text', maxlength: '20', autocomplete: 'nickname', 'aria-label': label, value: ui.nameDraft ?? '', placeholder: 'e.g. Nawfal', onInput: (e) => a.draft({ nameDraft: e.target.value }) }),
+    h('input', { type: 'text', maxlength: '20', autocomplete: 'nickname', 'aria-label': label, value: ui.nameDraft ?? '', placeholder: 'e.g. Nightmare', onInput: (e) => a.draft({ nameDraft: e.target.value }) }),
   );
 }
 
@@ -530,7 +538,7 @@ function renderModal(g, a, ui, me, room) {
   let el = null;
   if (!room && ui.status === 'name' && ui.inviteCode) {
     el = modal(`Join room ${ui.inviteCode}`, [
-      h('p', { text: 'You’ve been invited to a game of Hearthisle. What should the others call you?' }),
+      h('p', { text: 'You’ve been invited to a game of Koolkatan. What should the others call you?' }),
       nameField(ui, a),
       btn('Join the game', a.joinRoom, { class: 'btn wide', disabled: !(ui.nameDraft || '').trim() }),
     ], a, false);
@@ -593,7 +601,7 @@ export function render(g, a, ui, room) {
   renderLog(g);
   renderTurn(g, a, me);
   renderTrade(g, a, ui, me);
-  renderDevs(g, a, me);
+  renderDevs(g, a, ui, me);
   renderDock(g, a, me);
   renderModal(g, a, ui, me, room);
   if (focused) {

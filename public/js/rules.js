@@ -6,7 +6,7 @@ import { getGeometry } from './geometry.js';
 const geo = g => getGeometry(g.playerCount || g.players.length);
 
 export const RES = ['wood', 'brick', 'wheat', 'sheep', 'ore'];
-export const RES_NAME = { wood: 'Wood', brick: 'Brick', wheat: 'Wheat', sheep: 'Wool', ore: 'Ore' };
+export const RES_NAME = { wood: 'Wood', brick: 'Brick', wheat: 'Wheat', sheep: 'sheepar', ore: 'Ore' };
 export const RES_TERRAIN = { wood: 'forest', brick: 'hills', wheat: 'fields', sheep: 'pasture', ore: 'mountains' };
 export const TERRAIN_RES = { forest: 'wood', hills: 'brick', fields: 'wheat', pasture: 'sheep', mountains: 'ore', desert: null };
 export const TERRAIN_NAME = { forest: 'Forest', hills: 'Hills', fields: 'Fields', pasture: 'Pasture', mountains: 'Mountains', desert: 'Desert' };
@@ -37,11 +37,11 @@ export const SETUP_ORDER = [0, 1, 2, 3, 3, 2, 1, 0];
 export const DEV_TYPES = ['knight', 'roads', 'plenty', 'monopoly', 'vp'];
 export const DEV_NAME = { knight: 'Knight', roads: 'Road Building', plenty: 'Year of Plenty', monopoly: 'Monopoly', vp: 'Victory Point' };
 export const DEV_TEXT = {
-  knight: 'Move the robber and steal one card.',
-  roads: 'Place two roads at no cost.',
-  plenty: 'Take any two resources from the bank.',
-  monopoly: 'Claim every card of one resource.',
-  vp: 'Worth one hidden victory point.',
+  knight: 'Move the robber. Steal 1 random resource.',
+  roads: 'Build up to 2 roads for free.',
+  plenty: 'Take any 2 resources from the bank.',
+  monopoly: 'Take all cards of one resource from other players.',
+  vp: 'Adds 1 hidden victory point.',
 };
 export const DECK = [].concat(
   Array(14).fill('knight'),
