@@ -9,3 +9,7 @@ services:
     startCommand: npm start
     healthCheckPath: /api/health
     autoDeploy: true
+    envVars:
+      # Secret used to seal game backups so a restart can't lose a game. Render generates it once.
+      - key: SNAPSHOT_SECRET
+        generateValue: true

@@ -39,6 +39,7 @@ export function createRoom() {
     game: null,
     seatTokens: [], // game seat index -> member token
     touched: Date.now(),
+    version: 0,
     timers: {},
     listeners: new Set(), // (room) => void, set by the transport
   };
@@ -75,6 +76,7 @@ export const seatOf = (room, token) => (room.game ? room.seatTokens.indexOf(toke
 
 function changed(room) {
   room.touched = Date.now();
+  room.version++;
   for (const fn of room.listeners) fn(room);
 }
 
@@ -271,6 +273,54 @@ export function sweep(maxIdleMs = 6 * 60 * 60 * 1000) {
       rooms.delete(code);
     }
   }
+}
+
+/* ---------- surviving a server restart ---------- */
+export function snapshotOf(room) {
+  return {
+    v: 1,
+    code: room.code,
+    version: room.version,
+    hostToken: room.hostToken,
+    phase: room.phase,
+    options: room.options,
+    game: room.game ? { ...room.game, toast: null } : null,
+    seatTokens: room.seatTokens,
+    members: [...room.members.values()].map(({ token, id, name, color, role, joined }) => ({ token, id, name, color, role, joined })),
+  };
+}
+
+/** Rebuild a room from a sealed copy a browser handed back. Returns the room or null. */
+export function restoreRoom(data) {
+  if (!data || data.v !== 1 || typeof data.code !== 'string' || !Array.isArray(data.members)) return null;
+  const existing = rooms.get(data.code);
+  // A room already running is the truth, unless it was itself just restored
+  // from an older copy and nothing has happened since.
+  if (existing && !(existing.restoredFrom === existing.version && data.version > existing.version)) return existing;
+  if (data.game && !R.validSavedGame(data.game)) return existing || null;
+  const room = existing || createRoomWithCode(data.code);
+  room.hostToken = data.hostToken;
+  room.phase = data.phase === 'game' && data.game ? 'game' : 'lobby';
+  room.options = { quick: !!data.options?.quick };
+  room.game = room.phase === 'game' ? data.game : null;
+  room.seatTokens = Array.isArray(data.seatTokens) ? data.seatTokens : [];
+  room.members = new Map(data.members.map((m) => [m.token, { ...m, connected: 0 }]));
+  room.version = data.version;
+  room.restoredFrom = data.version;
+  if (room.game) {
+    // Finish anything that was mid-animation when the server stopped.
+    if (room.game.rolling) room.game = R.resolveRoll({ ...room.game, rolling: false }, room.game.dice, secureRandom);
+    room.game = R.clearProducing(room.game);
+  }
+  return room;
+}
+
+function createRoomWithCode(code) {
+  const room = createRoom();
+  rooms.delete(room.code);
+  room.code = code;
+  rooms.set(code, room);
+  return room;
 }
 
 export const _rooms = rooms; // for tests

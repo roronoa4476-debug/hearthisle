@@ -26,10 +26,13 @@ let room = null;
 let game = null;
 let ws = null;
 let retry = 0;
-let wantConnection = !!roomCode;
+const savedName = (store.get('hearthisle-name') || '').trim();
+// Opening an invite link asks for your name first (unless this browser already knows it).
+let wantConnection = !!roomCode && !!savedName;
 const ui = {
   panel: null,
-  status: roomCode ? 'connecting' : 'home',
+  status: roomCode ? (savedName ? 'connecting' : 'name') : 'home',
+  inviteCode: roomCode,
   error: '',
   nameDraft: store.get('hearthisle-name') || '',
   codeDraft: '',
@@ -71,9 +74,17 @@ function connect() {
   ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`);
   ws.addEventListener('open', () => {
     retry = 0;
-    ws.send(JSON.stringify({ type: 'hello', room: roomCode, token, name: (ui.nameDraft || '').trim() || undefined }));
+    const snapshot = roomCode ? store.get(`hearthisle-snap-${roomCode}`) : null;
+    ws.send(JSON.stringify({ type: 'hello', room: roomCode, token, name: (ui.nameDraft || '').trim() || undefined, snapshot: snapshot || undefined }));
   });
   ws.addEventListener('message', (event) => {
+    try {
+      onMessage(event);
+    } catch (err) {
+      console.error(err);
+    }
+  });
+  const onMessage = (event) => {
     let msg;
     try { msg = JSON.parse(event.data); } catch { return; }
     if (msg.type === 'error') {
@@ -91,6 +102,7 @@ function connect() {
       return;
     }
     if (msg.type !== 'room') return;
+    if (msg.snapshot) store.set(`hearthisle-snap-${msg.room.code}`, msg.snapshot);
     const hadOffer = !!game?.offer;
     const oldToast = game?.toast?.id;
     room = msg.room;
@@ -112,7 +124,7 @@ function connect() {
       timers.toast = setTimeout(() => { ui.toastHidden = id; draw(); }, 3200);
     }
     draw();
-  });
+  };
   ws.addEventListener('close', () => {
     if (!wantConnection) return;
     ui.status = 'connecting';
@@ -149,7 +161,8 @@ const actions = {
   },
   joinRoom() {
     store.set('hearthisle-name', ui.nameDraft.trim());
-    roomCode = ui.codeDraft.trim().toUpperCase();
+    roomCode = ui.inviteCode || ui.codeDraft.trim().toUpperCase();
+    ui.inviteCode = null;
     ui.error = '';
     connect();
   },
@@ -221,7 +234,8 @@ document.getElementById('menu').addEventListener('click', () => {
 });
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && e.target.matches?.('input')) {
-    if (!room && ui.codeDraft.trim().length >= 4) actions.joinRoom();
+    if (!room && ui.inviteCode && ui.nameDraft.trim()) actions.joinRoom();
+    else if (!room && ui.codeDraft.trim().length >= 4) actions.joinRoom();
     else if (!room && ui.nameDraft.trim()) actions.createRoom();
     else if (room) actions.saveName();
     return;

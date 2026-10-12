@@ -21,7 +21,7 @@ Settle an island, roll for resources, trade with each other and the bank, build 
 ## Play online with friends
 
 1. Open the game and type your name, then **Create a room**.
-2. **Copy link** and send it to your friends (or tell them the 4-letter room code).
+2. **Copy link** and send it to your friends (or tell them the 4-letter room code). When they open it, it asks their name first.
 3. Everyone picks a colour. Anyone who just wants to watch picks **Just watch**.
 4. The host chooses how opening settlements are placed and presses **Start game** (3–6 players).
 
@@ -33,7 +33,9 @@ The game runs as one small Node server, which fits [Render's free plan](https://
 2. Choose **New → Blueprint** and pick this repository. Render reads `render.yaml` and sets everything up.
 3. When it's live you get a link like `https://hearthisle.onrender.com`. Share that.
 
-Free-plan notes: the server sleeps after 15 minutes with nobody connected, so the first person to open the link may wait up to a minute while it wakes. Games live in the server's memory, so a game is lost if the server restarts or sleeps after everyone leaves.
+Free-plan notes: the server sleeps after 15 minutes with nobody connected, so the first person to open the link may wait up to a minute while it wakes. It stays awake while a game is being played.
+
+**Games survive restarts.** Render can restart a free server at any time, and pushing new code restarts it too. After every move the server gives each player's browser a sealed backup of the game (encrypted with a secret only the server knows, so nobody can read or edit it). If the server restarts, everyone's screen reconnects on its own, the first browser back hands over its backup, and the game continues from the last move. A crash in one message is logged and ignored instead of stopping the server.
 
 ## Run it on your computer
 
@@ -65,6 +67,7 @@ Plain HTML, CSS and JavaScript modules with a small Node server: no frameworks. 
 | `public/art/` | Terrain tiles, wood, sea and paper textures, and icons (all SVG). |
 | `server.mjs` | Serves the game and runs the WebSocket connection, with a strict content security policy. |
 | `server/rooms.mjs` | Rooms, colour picking, spectators, turn checks, and hiding other players' hands. |
+| `server/snapshots.mjs` | Sealed game backups that let a game survive a server restart. |
 | `render.yaml` | Free hosting setup for Render. |
 | `test/` | Rule tests with Node's built-in test runner. |
 

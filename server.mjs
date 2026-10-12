@@ -8,6 +8,7 @@ import { dirname, extname, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import * as Rooms from './server/rooms.mjs';
+import { seal, unseal } from './server/snapshots.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const publicDir = resolve(root, 'public');
@@ -78,14 +79,26 @@ export function createApp() {
 
 /* ---------- WebSocket rooms ---------- */
 function attachRooms(server) {
-  const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 16 * 1024 });
+  const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 512 * 1024 });
   const sockets = new Map(); // room code -> Set of { ws, token }
 
   const send = (ws, msg) => {
     if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(msg));
   };
   const broadcast = (room) => {
-    for (const c of sockets.get(room.code) || []) send(c.ws, Rooms.viewFor(room, c.token));
+    let snapshot = null;
+    try {
+      snapshot = seal(Rooms.snapshotOf(room));
+    } catch (err) {
+      console.error('snapshot failed', err);
+    }
+    for (const c of sockets.get(room.code) || []) {
+      try {
+        send(c.ws, { ...Rooms.viewFor(room, c.token), snapshot });
+      } catch (err) {
+        console.error('send failed', err);
+      }
+    }
   };
 
   wss.on('connection', (ws) => {
@@ -96,6 +109,13 @@ function attachRooms(server) {
     ws.on('pong', () => (ws.isAlive = true));
 
     ws.on('message', (data) => {
+      try {
+        handle(data);
+      } catch (err) {
+        console.error('message failed', err); // one bad message never takes the server down
+      }
+    });
+    const handle = (data) => {
       if (--budget < 0) return;
       let msg;
       try {
@@ -110,6 +130,15 @@ function attachRooms(server) {
         token = typeof msg.token === 'string' && /^[a-f0-9]{32}$/.test(msg.token) ? msg.token : null;
         if (!token) return send(ws, { type: 'error', message: 'Bad session. Reload the page.' });
         room = msg.room ? Rooms.getRoom(msg.room) : Rooms.createRoom();
+        // Server restarted? The browser's sealed copy brings the room back.
+        if (msg.room && msg.snapshot) {
+          const data = unseal(msg.snapshot);
+          if (data && data.code === String(msg.room).toUpperCase()) {
+            const restored = Rooms.restoreRoom(data);
+            if (restored && restored !== room) console.log(`restored room ${restored.code} at version ${restored.version}`);
+            room = restored || room;
+          }
+        }
         if (!room) {
           room = null;
           return send(ws, { type: 'error', code: 'no-room', message: 'That room doesn’t exist any more. Create a new one.' });
@@ -131,7 +160,7 @@ function attachRooms(server) {
       } else {
         Rooms.lobby(room, token, msg);
       }
-    });
+    };
 
     const refill = setInterval(() => (budget = 40), 5000);
     ws.on('close', () => {
@@ -159,6 +188,9 @@ function attachRooms(server) {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  // Log unexpected errors instead of exiting, so one bug can't end everyone's game.
+  process.on('uncaughtException', (err) => console.error('uncaught', err));
+  process.on('unhandledRejection', (err) => console.error('unhandled', err));
   const port = Number(process.env.PORT) || 5174;
   createApp().listen(port, '0.0.0.0', () => {
     console.log(`Hearthisle is running at http://localhost:${port}`);

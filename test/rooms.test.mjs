@@ -96,3 +96,20 @@ test('only the player who must discard can discard', () => {
   if (room.game.mode === 'discard') assert.equal(Rooms.act(room, room.seatTokens[victim], 'discard', [cards]), true);
   assert.equal(room.game.mode, 'robber');
 });
+
+test('a sealed backup restores a game after a restart, and tampering is rejected', async () => {
+  const { seal, unseal } = await import('../server/snapshots.mjs');
+  const room = lobbyWith(['Host', 'Ali', 'Sara']);
+  Rooms.lobby(room, tok(1), { type: 'setOption', quick: true });
+  Rooms.lobby(room, tok(1), { type: 'start' });
+  const sealed = seal(Rooms.snapshotOf(room));
+  assert.equal(unseal(sealed.slice(0, -4) + 'AAAA'), null, 'edited backups are refused');
+  // simulate the server forgetting everything
+  Rooms._rooms.delete(room.code);
+  const back = Rooms.restoreRoom(unseal(sealed));
+  assert.ok(back);
+  assert.equal(back.code, room.code);
+  assert.deepEqual(back.game.players, room.game.players);
+  assert.equal(Rooms.seatOf(back, tok(2)), Rooms.seatOf(room, tok(2)), 'everyone keeps their seat');
+  assert.equal(Rooms.restoreRoom(unseal(sealed)), back, 'a second copy does not overwrite a running room');
+});

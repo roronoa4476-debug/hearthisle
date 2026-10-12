@@ -6,3 +6,4 @@ node_modules/
 coverage/
 *.log
 backup-v0.2/
+.data/

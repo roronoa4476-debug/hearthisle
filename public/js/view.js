@@ -208,7 +208,7 @@ function renderPlayers(g, a, ui, me, room) {
   $('players').replaceChildren(
     panelTitle('Players', room ? h('small', { text: `Room ${room.code}` }) : null),
     h('div', { class: 'player-list', role: 'list' }, ...rows),
-    watchers.length ? h('p', { class: 'watchers' }, h('span', { class: 'eye', 'aria-hidden': 'true' }), `Watching: ${watchers.map((m) => m.name + (m.connected ? '' : ' (away)')).join(', ')}`) : null,
+    ...(watchers.length ? [h('p', { class: 'watchers' }, h('span', { class: 'eye', 'aria-hidden': 'true' }), `Watching: ${watchers.map((m) => m.name + (m.connected ? '' : ' (away)')).join(', ')}`)] : []),
   );
 }
 
@@ -516,7 +516,13 @@ function lobbyModal(a, ui, room) {
 
 function renderModal(g, a, ui, me, room) {
   let el = null;
-  if (!room) {
+  if (!room && ui.status === 'name' && ui.inviteCode) {
+    el = modal(`Join room ${ui.inviteCode}`, [
+      h('p', { text: 'You’ve been invited to a game of Hearthisle. What should the others call you?' }),
+      nameField(ui, a),
+      btn('Join the game', a.joinRoom, { class: 'btn wide', disabled: !(ui.nameDraft || '').trim() }),
+    ], a, false);
+  } else if (!room) {
     el = ui.status === 'connecting' ? modal('Connecting…', [h('p', { class: 'muted', text: 'Waking up the table. On a free server this can take up to a minute.' })], a, false) : homeModal(a, ui);
   } else if (room.phase === 'lobby') {
     el = lobbyModal(a, ui, room);
