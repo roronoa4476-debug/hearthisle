@@ -68,16 +68,21 @@ new ResizeObserver(fitBoard).observe(document.getElementById('table'));
 
 /* ---------- connection ---------- */
 function connect() {
+  clearTimeout(timers.retry);
   wantConnection = true;
   ui.status = 'connecting';
   draw();
-  ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`);
-  ws.addEventListener('open', () => {
-    retry = 0;
+  const previous = ws;
+  const socket = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`);
+  ws = socket;
+  previous?.close();
+  socket.addEventListener('open', () => {
+    if (socket !== ws) return;
     const snapshot = roomCode ? store.get(`hearthisle-snap-${roomCode}`) : null;
-    ws.send(JSON.stringify({ type: 'hello', room: roomCode, token, name: (ui.nameDraft || '').trim() || undefined, snapshot: snapshot || undefined }));
+    socket.send(JSON.stringify({ type: 'hello', room: roomCode, token, name: (ui.nameDraft || '').trim() || undefined, snapshot: snapshot || undefined }));
   });
-  ws.addEventListener('message', (event) => {
+  socket.addEventListener('message', (event) => {
+    if (socket !== ws) return;
     try {
       onMessage(event);
     } catch (err) {
@@ -89,19 +94,23 @@ function connect() {
     try { msg = JSON.parse(event.data); } catch { return; }
     if (msg.type === 'error') {
       ui.error = msg.message;
-      if (msg.code === 'no-room' || msg.code === 'removed') {
-        wantConnection = false;
-        roomCode = null;
-        history.replaceState(null, '', '/');
-      }
+      // A rejected join needs a new choice from the player, not a retry loop.
+      wantConnection = false;
+      clearTimeout(timers.retry);
+      ui.inviteCode = null;
+      roomCode = null;
+      history.replaceState(null, '', '/');
       ui.status = 'home';
       room = null;
       game = null;
-      ws.close();
+      setBusy(false);
+      socket.close();
       draw();
       return;
     }
     if (msg.type !== 'room') return;
+    retry = 0;
+    ui.inviteCode = null;
     if (msg.snapshot) saveBackup(msg.room.code, msg.snapshot, msg.room.version);
     setBusy(false);
     const hadOffer = !!game?.offer;
@@ -126,8 +135,8 @@ function connect() {
     }
     draw();
   };
-  ws.addEventListener('close', () => {
-    if (!wantConnection) return;
+  socket.addEventListener('close', () => {
+    if (socket !== ws || !wantConnection) return;
     ui.status = 'connecting';
     showNotice('Connection lost — reconnecting…');
     clearTimeout(timers.retry);
@@ -188,6 +197,7 @@ const actions = {
   createRoom() {
     store.set('hearthisle-name', ui.nameDraft.trim());
     roomCode = null;
+    ui.inviteCode = null;
     ui.error = '';
     connect();
   },
@@ -200,10 +210,14 @@ const actions = {
   },
   leave() {
     wantConnection = false;
-    ws?.close();
+    clearTimeout(timers.retry);
+    const previous = ws;
+    ws = null;
+    previous?.close();
     room = null;
     game = null;
     roomCode = null;
+    ui.inviteCode = null;
     ui.panel = null;
     ui.status = 'home';
     history.replaceState(null, '', '/');
