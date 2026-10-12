@@ -269,14 +269,15 @@ function renderTurn(g, a, me) {
 
 const describe = (b) => R.RES.filter((r) => b[r]).flatMap((r) => [h('b', { text: b[r] }), icon(r)]);
 
-function basketChips(basket, onStep, limit) {
+function basketChips(basket, onStep, limit, purpose = 'request') {
+  const supply = R.configFor(G_NOW.playerCount).resourceCount;
   return h('div', { class: 'chips' },
     ...R.RES.map((r) => h('div', { class: 'chip counter' },
       icon(r),
       h('span', { class: `n${basket[r] ? '' : ' zero'}`, text: basket[r] }),
       h('span', { class: 'step' },
-        h('button', { type: 'button', text: '−', 'aria-label': `Fewer ${R.RES_NAME[r]}`, disabled: !basket[r], onClick: () => onStep(r, -1) }),
-        h('button', { type: 'button', text: '+', 'aria-label': `More ${R.RES_NAME[r]}`, disabled: basket[r] >= (limit ? limit[r] : 19), onClick: () => onStep(r, 1) }),
+        h('button', { type: 'button', text: '−', 'aria-label': `Fewer ${R.RES_NAME[r]} to ${purpose}`, disabled: !basket[r], onClick: () => onStep(r, -1) }),
+        h('button', { type: 'button', text: '+', 'aria-label': `More ${R.RES_NAME[r]} to ${purpose}`, disabled: basket[r] >= (limit ? limit[r] : supply), onClick: () => onStep(r, 1) }),
       ),
     )),
   );
@@ -325,7 +326,7 @@ function renderTrade(g, a, ui, me) {
     } else if (ui.counter === me) {
       content.push(
         h('div', { class: 'row-label' }, h('span', { text: `You give ${name(g.cur)}` })),
-        basketChips(ui.get, (r, d) => a.ui({ get: { ...ui.get, [r]: Math.max(0, ui.get[r] + d) } }), g.players[me].res),
+        basketChips(ui.get, (r, d) => a.ui({ get: { ...ui.get, [r]: Math.max(0, ui.get[r] + d) } }), g.players[me].res, 'give'),
         h('div', { class: 'row-label' }, h('span', { text: 'You get' })),
         basketChips(ui.give, (r, d) => a.ui({ give: { ...ui.give, [r]: Math.max(0, ui.give[r] + d) } })),
         h('div', { class: 'summary' }, btn('Cancel', () => a.ui({ counter: null }), { class: 'linkish' }), btn('Send counter', () => a.counter(me), { class: 'btn small', disabled: !R.validExchange(ui.give, ui.get) || !R.afford(g.players[me].res, ui.get) })),
@@ -347,7 +348,7 @@ function renderTrade(g, a, ui, me) {
   } else if (mine && open) {
     content.push(
       h('div', { class: 'row-label' }, h('span', { text: 'You give' })),
-      basketChips(ui.give, (r, d) => a.ui({ give: { ...ui.give, [r]: Math.max(0, ui.give[r] + d) } }), g.players[me].res),
+      basketChips(ui.give, (r, d) => a.ui({ give: { ...ui.give, [r]: Math.max(0, ui.give[r] + d) } }), g.players[me].res, 'give'),
       h('div', { class: 'row-label' }, h('span', { text: 'You want' })),
       basketChips(ui.get, (r, d) => a.ui({ get: { ...ui.get, [r]: Math.max(0, ui.get[r] + d) } })),
       h('div', { class: 'summary' }, h('p', { class: 'muted', text: 'Everyone sees your offer.' }), btn('Offer', a.propose, { class: 'btn small', disabled: !R.validExchange(ui.give, ui.get) || !R.afford(g.players[me].res, ui.give) })),
@@ -547,7 +548,7 @@ function renderModal(g, a, ui, me, room) {
     const need = g.discards.find((d) => d.p === me).n;
     el = modal('Return cards to the bank', [
       h('p', { text: `A 7 was rolled and you hold more than 7 cards. Choose exactly ${need} to return.` }),
-      basketChips(ui.discard, (r, d) => a.ui({ discard: { ...ui.discard, [r]: Math.max(0, ui.discard[r] + d) } }), g.players[me].res),
+      basketChips(ui.discard, (r, d) => a.ui({ discard: { ...ui.discard, [r]: Math.max(0, ui.discard[r] + d) } }), g.players[me].res, 'discard'),
       h('p', { class: 'muted', text: `Selected ${R.totalCards(ui.discard)} of ${need}` }),
       btn('Return these cards', a.discard, { class: 'btn wide', disabled: R.totalCards(ui.discard) !== need }),
     ], a, false);
