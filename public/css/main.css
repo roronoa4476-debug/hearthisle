@@ -438,3 +438,58 @@ h1, h2, h3, p { margin: 0; }
   .chip .icon { width: 22px; height: 22px; }
   #frame { padding: 10px; }
 }
+
+/* ---------- online: players, spectators ---------- */
+.player-list { display: flex; flex-direction: column; gap: 6px; }
+.player { cursor: default; }
+.player.away { opacity: 0.6; }
+.tag.host { background: #8a5a14; }
+.tag.away { background: #9a8a7a; }
+.watchers { display: flex; align-items: center; gap: 6px; margin-top: 7px; font-size: 11.5px; font-weight: 800; color: var(--ink-soft); line-height: 1.3; }
+.eye { flex: none; width: 16px; height: 10px; border-radius: 50% / 60%; border: 2px solid #6e4a2a; position: relative; }
+.eye::after { content: ''; position: absolute; left: 50%; top: 50%; width: 4px; height: 4px; border-radius: 50%; background: #6e4a2a; transform: translate(-50%, -50%); }
+.eye.big { width: 34px; height: 21px; border-width: 3px; }
+.eye.big::after { width: 9px; height: 9px; }
+.spectating { flex: 1; display: flex; align-items: center; gap: 14px; padding: 14px 16px; border-radius: 10px; background: rgba(255, 250, 236, 0.85); box-shadow: inset 0 0 0 1px rgba(110, 62, 24, 0.25); }
+.spectating b { font-size: 16px; font-weight: 900; }
+
+/* ---------- online: home & lobby ---------- */
+.field { display: flex; flex-direction: column; gap: 5px; flex: 1; min-width: 0; }
+.field span { font-size: 12px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.06em; color: #5a3416; }
+input[type='text'] {
+  width: 100%; min-height: 42px; padding: 0 12px; border: 0; border-radius: 9px;
+  font: inherit; font-size: 15px; font-weight: 800; color: var(--ink);
+  background: #fffaf0; box-shadow: inset 0 1px 3px rgba(110, 62, 24, 0.35), inset 0 0 0 1.5px rgba(110, 62, 24, 0.35);
+}
+input[type='text']:focus { outline: none; box-shadow: inset 0 1px 3px rgba(110, 62, 24, 0.35), 0 0 0 3px #1f6fe0; }
+.divider-text { display: flex; align-items: center; gap: 10px; font-size: 12px; font-weight: 900; color: var(--ink-soft); text-transform: uppercase; letter-spacing: 0.06em; }
+.divider-text::before, .divider-text::after { content: ''; flex: 1; height: 1px; background: rgba(110, 62, 24, 0.35); }
+.join-row, .name-row { display: flex; gap: 8px; align-items: flex-end; }
+.join-row input { text-transform: uppercase; letter-spacing: 0.12em; }
+.join-row .btn, .name-row .btn { min-height: 42px; }
+.error { color: var(--danger); font-weight: 900; }
+.invite { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 10px 9px 12px; }
+.invite small { display: block; font-size: 11px; font-weight: 900; color: var(--ink-soft); text-transform: uppercase; letter-spacing: 0.05em; }
+.invite-link { font-size: 14px; font-weight: 900; word-break: break-all; color: #1f4f9a; }
+.color-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.color-pick {
+  display: grid; grid-template-columns: 30px 1fr; grid-template-rows: auto auto; gap: 0 8px; align-items: center; text-align: left;
+  min-height: 52px; padding: 7px 9px; border: 0; border-radius: 10px;
+  background: rgba(255, 250, 236, 0.92); box-shadow: inset 0 0 0 1px rgba(110, 62, 24, 0.3), 0 2px 0 rgba(110, 62, 24, 0.4);
+  transition: transform 0.08s, box-shadow 0.12s;
+}
+.color-pick .mark { grid-row: span 2; width: 30px; height: 30px; }
+.color-pick .color-name { font-weight: 900; font-size: 14px; line-height: 1.1; }
+.color-pick small { font-size: 11.5px; font-weight: 800; color: var(--ink-soft); line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.color-pick:hover:enabled { background: #fffdf6; }
+.color-pick:active:enabled { transform: translateY(2px); }
+.color-pick.mine { background: #fffdf6; box-shadow: inset 0 0 0 3px var(--pc), 0 2px 0 rgba(110, 62, 24, 0.4); }
+.color-pick.mine small { color: var(--ink); }
+.color-pick.taken { opacity: 0.55; cursor: not-allowed; }
+.color-pick.taken .mark { filter: grayscale(0.5); }
+.spectate-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.spectate-row .option { padding: 0 14px; min-height: 40px; }
+.spectate-row small { font-size: 12px; font-weight: 800; color: var(--ink-soft); }
+.host-box { display: flex; flex-direction: column; gap: 8px; padding-top: 4px; border-top: 1px solid rgba(110, 62, 24, 0.3); }
+.center { text-align: center; }
+.modal { width: min(520px, calc(100vw - 32px)); }

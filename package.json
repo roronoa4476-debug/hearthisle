@@ -1,13 +1,18 @@
 {
-  "name": "catan",
-  "version": "0.3.0",
+  "name": "hearthisle",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
-  "description": "Hearthisle: a bright 2D island game for 3–6 players, with local shared-computer play and 2025 paired turns.",
-  "engines": { "node": ">=22.13.0" },
+  "description": "Hearthisle: a Catan-style island board game for 3–6 players with free online rooms.",
+  "engines": {
+    "node": ">=22.13.0"
+  },
   "scripts": {
     "dev": "node --watch server.mjs",
     "start": "node server.mjs",
     "test": "node --test"
+  },
+  "dependencies": {
+    "ws": "8.21.3"
   }
 }

@@ -26,6 +26,13 @@ export const PLAYERS = [
   { name: 'Green', color: '#2fa84a', edge: '#0f4a1c', mark: 'star' },
   { name: 'Purple', color: '#8e44cf', edge: '#3a145e', mark: 'cross' },
 ];
+// A seat's name and colour. Online games store each player's chosen colour
+// (an index into PLAYERS) and name in g.seats; local games use the default order.
+export function player(g, p) {
+  const seat = g?.seats?.[p];
+  const base = PLAYERS[seat ? seat.color : p];
+  return seat?.name ? { ...base, name: seat.name } : base;
+}
 export const SETUP_ORDER = [0, 1, 2, 3, 3, 2, 1, 0];
 export const DEV_TYPES = ['knight', 'roads', 'plenty', 'monopoly', 'vp'];
 export const DEV_NAME = { knight: 'Knight', roads: 'Road Building', plenty: 'Invention', monopoly: 'Monopoly', vp: 'Victory Point' };
@@ -71,7 +78,7 @@ const shuffle = (list, rng) => {
 export const rollDice = (rng = Math.random) => [1 + Math.floor(rng() * 6), 1 + Math.floor(rng() * 6)];
 
 function log(g, text, who = g.cur) {
-  g.log = [{ id: ++g.serial, text, color: PLAYERS[who].color }, ...g.log].slice(0, 60);
+  g.log = [{ id: ++g.serial, text, color: player(g, who).color }, ...g.log].slice(0, 60);
 }
 function toast(g, text) {
   g.toast = { id: ++g.serial, text };
@@ -207,7 +214,7 @@ export function robberTargets(g) {
   return g.mode === 'robber' ? geo(g).hexes.filter((h) => h.id !== g.robber).map((h) => h.id) : [];
 }
 export function prompt(g) {
-  if (g.winner !== null) return `${PLAYERS[g.winner].name} has won the island.`;
+  if (g.winner !== null) return `${player(g, g.winner).name} has won the island.`;
   if (g.phase === 'setup') {
     return g.setup.need === 'settlement'
       ? `Place your ${g.setup.step < g.players.length ? 'first' : 'second'} settlement on a marked corner.`
@@ -215,7 +222,7 @@ export function prompt(g) {
   }
   if (g.rolling) return 'The dice are rolling…';
   switch (g.mode) {
-    case 'discard': return `${PLAYERS[g.discards[0].p].name}: choose ${g.discards[0].n} cards to return to the bank.`;
+    case 'discard': return `${player(g, g.discards[0].p).name}: choose ${g.discards[0].n} cards to return to the bank.`;
     case 'robber': return 'Choose a tile for the robber.';
     case 'steal': return 'Choose a player to steal from.';
     case 'plenty': return `Pick ${g.plentyLeft} resource${g.plentyLeft > 1 ? 's' : ''} from the bank.`;
@@ -247,7 +254,7 @@ function updateLongest(g) {
   g.roadLens = lens;
   const max = Math.max(...lens), leaders=lens.flatMap((n,i)=>n===max?[i]:[]);
   const holder = max < 5 ? null : leaders.includes(g.longest) ? g.longest : leaders.length===1 ? leaders[0] : null;
-  if (holder !== null && holder !== g.longest) log(g, `${PLAYERS[holder].name} takes Longest Road (${lens[holder]}).`, holder);
+  if (holder !== null && holder !== g.longest) log(g, `${player(g, holder).name} takes Longest Road (${lens[holder]}).`, holder);
   g.longest = holder;
 }
 function updateArmy(g) {
@@ -255,14 +262,14 @@ function updateArmy(g) {
   const k = g.players[p].knights;
   if (k >= 3 && g.army !== p && (g.army === null || k > g.players[g.army].knights)) {
     g.army = p;
-    log(g, `${PLAYERS[p].name} takes Largest Army.`);
+    log(g, `${player(g, p).name} takes Largest Army.`);
   }
 }
 function checkWin(g) {
   if (g.winner === null && victoryPoints(g, g.cur, true) >= WIN_POINTS) {
     g.winner = g.cur;
     g.mode = null;
-    log(g, `${PLAYERS[g.cur].name} reaches ${WIN_POINTS} points and wins.`);
+    log(g, `${player(g, g.cur).name} reaches ${WIN_POINTS} points and wins.`);
   }
 }
 function steal(g, from, rng) {
@@ -272,8 +279,8 @@ function steal(g, from, rng) {
   const k = pool[Math.floor(rng() * pool.length)];
   r[k]--;
   g.players[g.cur].res[k]++;
-  toast(g, `You took 1 ${RES_NAME[k]} from ${PLAYERS[from].name}.`);
-  log(g, `${PLAYERS[g.cur].name} stole a card from ${PLAYERS[from].name}.`);
+  toast(g, `You took 1 ${RES_NAME[k]} from ${player(g, from).name}.`);
+  log(g, `${player(g, g.cur).name} stole a card from ${player(g, from).name}.`);
 }
 function vertexScore(g, vid) {
   const kinds = new Set();
@@ -289,7 +296,8 @@ function vertexScore(g, vid) {
 }
 
 /* ---------- game creation ---------- */
-export function createGame({ randomize = true, autoSetup = true, rng = Math.random, playerCount=4, chooseFirst=false, firstPlayer=0 } = {}) {
+export function createGame({ randomize = true, autoSetup = true, rng = Math.random, playerCount=4, chooseFirst=false, firstPlayer=0, seats=null } = {}) {
+  if (seats) playerCount = seats.length;
   if (![3,4,5,6].includes(playerCount)) throw new RangeError('Choose 3–6 players');
   const board = newBoard(randomize, rng, playerCount);
   const openingRolls=Array(playerCount).fill(null);
@@ -305,7 +313,7 @@ export function createGame({ randomize = true, autoSetup = true, rng = Math.rand
   const setupOrder=Array.from({length:playerCount},(_,i)=>(firstPlayer+i)%playerCount);
   setupOrder.push(...setupOrder.slice().reverse());
   const g = {
-    schema: 2, serial: 0, playerCount, firstPlayer, lead:firstPlayer, paired:false, setupOrder, openingRolls,
+    schema: 2, serial: 0, playerCount, seats: seats ? seats.map(({ name, color }) => ({ name: String(name).slice(0, 24), color })) : null, firstPlayer, lead:firstPlayer, paired:false, setupOrder, openingRolls,
     bank:Object.fromEntries(RES.map(r=>[r,configFor(playerCount).resourceCount])),
     letters:board.letters || [], discards:[], gains:[], offer:null,
     terrain: board.terrain,
@@ -368,10 +376,10 @@ export function createGame({ randomize = true, autoSetup = true, rng = Math.rand
     g.setup = null;
     updateLongest(g);
     log(g, 'Opening settlements placed in snake order.', 3);
-    log(g, `${PLAYERS[g.firstPlayer].name} to roll.`, firstPlayer);
+    log(g, `${player(g, g.firstPlayer).name} to roll.`, firstPlayer);
   } else {
-    log(g, `A new island is drawn. ${PLAYERS[g.firstPlayer].name} places first.`, firstPlayer);
-    toast(g, `${PLAYERS[g.firstPlayer].name}: place your first settlement on a corner.`);
+    log(g, `A new island is drawn. ${player(g, g.firstPlayer).name} places first.`, firstPlayer);
+    toast(g, `${player(g, g.firstPlayer).name}: place your first settlement on a corner.`);
   }
   return g;
 }
@@ -386,7 +394,7 @@ export function resolveRoll(s, dice, rng = Math.random) {
   if (s.phase !== 'roll' || s.winner !== null || isBlocking(s) || !Array.isArray(dice) || dice.length!==2 || dice.some(n=>!Number.isInteger(n)||n<1||n>6)) return s;
   const g = clone(s);
   const sum = dice[0] + dice[1];
-  const me = PLAYERS[g.cur].name;
+  const me = player(g, g.cur).name;
   g.rolling = false;
   g.dice = dice;
   g.lastRoll = sum;
@@ -424,7 +432,7 @@ export function resolveRoll(s, dice, rng = Math.random) {
   const describe = (gr) => RES.filter((r) => gr[r]).map((r) => `${gr[r]} ${RES_NAME[r]}`).join(', ');
   const mine = describe(gains[g.cur]);
   toast(g, mine ? `Rolled ${sum} — you collect ${mine}.` : `Rolled ${sum} — nothing for you this time.`);
-  const all = gains.map((gr, i) => (describe(gr) ? `${PLAYERS[i].name} +${describe(gr)}` : '')).filter(Boolean).join('; ');
+  const all = gains.map((gr, i) => (describe(gr) ? `${player(g, i).name} +${describe(gr)}` : '')).filter(Boolean).join('; ');
   log(g, `${me} rolled ${sum}${all ? `: ${all}` : '.'}${shortages.length?` Bank shortage: ${shortages.join(', ')}.`:''}`);
   return g;
 }
@@ -447,7 +455,7 @@ export function endTurn(s) {
   g.turn++;
   g.producing = [];
   g.gains=[];g.offer=null;checkWin(g);
-  toast(g, `${PLAYERS[g.cur].name}’s turn${g.paired?' — actions only.':' — roll the dice.'}`);
+  toast(g, `${player(g, g.cur).name}’s turn${g.paired?' — actions only.':' — roll the dice.'}`);
   return g;
 }
 
@@ -506,7 +514,7 @@ export function placeAtVertex(s, vid) {
     g.setup.lastV = vid;
     g.setup.need = 'road';
     g.mode = 'road';
-    log(g, `${PLAYERS[p].name} founded a settlement.`);
+    log(g, `${player(g, p).name} founded a settlement.`);
     updateLongest(g);
     return g;
   }
@@ -515,12 +523,12 @@ export function placeAtVertex(s, vid) {
   if (g.mode === 'settlement' && canSettle(g, vid, p, false)) {
     payBank(g,p,COST.settlement);
     placeTown(g, vid, p);
-    log(g, `${PLAYERS[p].name} built a settlement.`);
+    log(g, `${player(g, p).name} built a settlement.`);
     updateLongest(g); // a new settlement can cut an opponent's road
   } else if (g.mode === 'city' && canCity(g, vid, p)) {
     payBank(g,p,COST.city);
     g.settlements[vid].city = true;
-    log(g, `${PLAYERS[p].name} raised a city.`);
+    log(g, `${player(g, p).name} raised a city.`);
   } else {
     return s;
   }
@@ -542,12 +550,12 @@ export function placeAtEdge(s, eid) {
       g.cur = g.firstPlayer;
       g.mode = null;
       g.setup = null;
-      toast(g, `Openings placed. ${PLAYERS[g.firstPlayer].name} rolls first.`);
+      toast(g, `Openings placed. ${player(g, g.firstPlayer).name} rolls first.`);
     } else {
       g.cur = g.setupOrder[g.setup.step];
       g.setup.need = 'settlement';
       g.mode = null;
-      toast(g, `${PLAYERS[g.cur].name}: place a settlement.`);
+      toast(g, `${player(g, g.cur).name}: place a settlement.`);
     }
     updateLongest(g);
     return g;
@@ -556,7 +564,7 @@ export function placeAtEdge(s, eid) {
   if (g.freeRoads > 0) g.freeRoads--;
   else payBank(g,p,COST.road);
   placeRoad(g, eid, p);
-  log(g, `${PLAYERS[p].name} built a road.`);
+  log(g, `${player(g, p).name} built a road.`);
   updateLongest(g);
   if (!(g.freeRoads > 0 && piecesLeft(g, p).road > 0 && validEdges(g).length)) {
     g.mode = null;
@@ -571,7 +579,7 @@ export function moveRobber(s, hid, rng = Math.random) {
   const g = clone(s);
   g.robber = hid;
   const n = g.numbers[hid];
-  log(g, `${PLAYERS[g.cur].name} moved the robber to ${TERRAIN_NAME[g.terrain[hid]]}${n ? ` ${n}` : ''}.`);
+  log(g, `${player(g, g.cur).name} moved the robber to ${TERRAIN_NAME[g.terrain[hid]]}${n ? ` ${n}` : ''}.`);
   const victims = [];
   for (const v of geo(g).hexes[hid].verts) {
     const t = g.settlements[v];
@@ -612,7 +620,7 @@ export function buyDevCard(s) {
   pl.dev.push({ type: card, turn: g.turn });
   g.mode = null;
   toast(g, `You drew ${DEV_NAME[card]}.`);
-  log(g, `${PLAYERS[p].name} bought a development card.`);
+  log(g, `${player(g, p).name} bought a development card.`);
   checkWin(g);
   return g;
 }
@@ -622,7 +630,7 @@ export function playDevCard(s, type) {
   const g = clone(s);
   const p = g.cur;
   const pl = g.players[p];
-  const name = PLAYERS[p].name;
+  const name = player(g, p).name;
   pl.dev.splice(pl.dev.findIndex((c) => c.type === type && c.turn < g.turn), 1);
   g.devPlayed = true;
   if (type === 'knight') {
@@ -673,7 +681,7 @@ export function pickResource(s, r) {
     g.players[p].res[r] += n;
     g.mode = null;
     toast(g, `Monopoly claims ${n} ${RES_NAME[r]}.`);
-    log(g, `${PLAYERS[p].name} claimed ${n} ${RES_NAME[r]}.`);
+    log(g, `${player(g, p).name} claimed ${n} ${RES_NAME[r]}.`);
   }
   return g;
 }
@@ -693,7 +701,7 @@ export function bankTrade(s) {
   const ratio = harborRatio(g, p, give);
   g.players[p].res[give] -= ratio;g.bank[give]+=ratio;
   g.players[p].res[get] += 1;g.bank[get]--;
-  log(g, `${PLAYERS[p].name} traded ${ratio} ${RES_NAME[give]} for 1 ${RES_NAME[get]}.`);
+  log(g, `${player(g, p).name} traded ${ratio} ${RES_NAME[give]} for 1 ${RES_NAME[get]}.`);
   cancelUnaffordableBuild(g);
   return g;
 }
@@ -719,8 +727,8 @@ export function acceptOffer(s, q) {
   b[give] += giveN;
   b[get] -= getN;
   a[get] += getN;
-  toast(g, `${PLAYERS[q].name} accepted your offer.`);
-  log(g, `${PLAYERS[g.cur].name} traded with ${PLAYERS[q].name}.`);
+  toast(g, `${player(g, q).name} accepted your offer.`);
+  log(g, `${player(g, g.cur).name} traded with ${player(g, q).name}.`);
   cancelUnaffordableBuild(g);
   return g;
 }
@@ -733,7 +741,7 @@ export function discardCards(s,cards){
   const {p,n}=s.discards[0];
   if(totalCards(cards)!==n||!afford(s.players[p].res,cards))return s;
   const g=clone(s);payBank(g,p,cards);g.discards.shift();g.mode=g.discards.length?'discard':'robber';
-  log(g,`${PLAYERS[p].name} discarded ${n} cards.`,p);return g;
+  log(g,`${player(g, p).name} discarded ${n} cards.`,p);return g;
 }
 export function updateAwards(s){const g=clone(s);updateLongest(g);checkWin(g);return g;}
 export function canBuild(g,kind){
@@ -763,7 +771,7 @@ export function confirmTrade(s,p){
   if(!validExchange(give,get)||!afford(s.players[s.cur].res,give)||!afford(s.players[p].res,get))return s;
   const g=clone(s);
   for(const r of RES){g.players[g.cur].res[r]+=get[r]-give[r];g.players[p].res[r]+=give[r]-get[r];}
-  g.offer=null;cancelUnaffordableBuild(g);log(g,`${PLAYERS[g.cur].name} traded with ${PLAYERS[p].name}.`);return g;
+  g.offer=null;cancelUnaffordableBuild(g);log(g,`${player(g, g.cur).name} traded with ${player(g, p).name}.`);return g;
 }
 export function withdrawTrade(s){return s.offer?{...s,offer:null}:s;}
 // Used before accepting browser saves: reject incompatible or damaged states.

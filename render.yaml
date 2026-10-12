@@ -1,0 +1,11 @@
+# One-click setup for Render's free tier (https://render.com).
+# Render reads this file when you create a "Blueprint" from the GitHub repo.
+services:
+  - type: web
+    name: hearthisle
+    runtime: node
+    plan: free
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeploy: true

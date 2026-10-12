@@ -28,8 +28,11 @@ function h(tag, props = {}, ...children) {
 }
 const btn = (text, onClick, props = {}) => h('button', { type: 'button', text, onClick, ...props });
 const icon = (name, extra = '') => h('span', { class: `icon i-${name}${extra ? ` ${extra}` : ''}`, 'aria-hidden': 'true' });
-const mark = (p) => playerMark(R.PLAYERS[p]);
-const name = (p) => R.PLAYERS[p].name;
+let G_NOW = null; // the game being drawn; seats carry each player's chosen name and colour
+const who = (p) => R.player(G_NOW, p);
+const mark = (p) => playerMark(who(p));
+const name = (p) => who(p).name;
+const count = (pl) => pl.cardCount ?? R.totalCards(pl.res);
 const costIcons = (cost) => h('span', { class: 'cost' }, Object.entries(cost).flatMap(([r, n]) => Array.from({ length: n }, () => icon(r))));
 const panelTitle = (title, extra) => h('h2', { class: 'panel-title' }, h('span', { text: title }), extra || null);
 
@@ -117,7 +120,7 @@ function renderBoard(g, a, me) {
     if (board.roads.has(eid)) continue;
     const e = GEO.edges[eid];
     const p = g.roads[eid];
-    const el = h('div', { class: 'road', role: 'img', 'aria-label': `${name(p)} road`, style: at(e.x, e.y, { transform: `translate(-50%, -50%) rotate(${e.angle.toFixed(1)}deg)` }) }, roadArt(R.PLAYERS[p]));
+    const el = h('div', { class: 'road', role: 'img', 'aria-label': `${name(p)} road`, style: at(e.x, e.y, { transform: `translate(-50%, -50%) rotate(${e.angle.toFixed(1)}deg)` }) }, roadArt(who(p)));
     board.roads.set(eid, el);
     board.roadLayer.append(el);
   }
@@ -131,7 +134,7 @@ function renderBoard(g, a, me) {
     }
     if (!el) {
       const v = GEO.verts[vid];
-      el = h('div', { class: `piece ${kind}`, 'data-kind': kind, role: 'img', 'aria-label': `${name(t.p)} ${kind}`, style: at(v.x, v.y) }, t.city ? cityArt(R.PLAYERS[t.p]) : settlementArt(R.PLAYERS[t.p]));
+      el = h('div', { class: `piece ${kind}`, 'data-kind': kind, role: 'img', 'aria-label': `${name(t.p)} ${kind}`, style: at(v.x, v.y) }, t.city ? cityArt(who(t.p)) : settlementArt(who(t.p)));
       board.towns.set(vid, el);
       board.townLayer.append(el);
     }
@@ -144,7 +147,7 @@ function renderBoard(g, a, me) {
   // Only the seat whose turn it is gets clickable spots.
   const hits = [];
   if (me === g.cur) {
-    const pc = R.PLAYERS[g.cur].color === '#f7f3ea' ? '#8a6a3a' : R.PLAYERS[g.cur].color;
+    const pc = who(g.cur).light ? '#8a6a3a' : who(g.cur).color;
     for (const eid of R.validEdges(g)) {
       const e = GEO.edges[eid];
       hits.push(h('button', { class: 'ehit', type: 'button', 'aria-label': 'Build a road here', style: at(e.x, e.y, { '--pc': pc, transform: `translate(-50%, -50%) rotate(${e.angle.toFixed(1)}deg)` }), onClick: () => a.placeAtEdge(eid) }));
@@ -172,27 +175,28 @@ function noticeFor(g, me) {
 }
 
 /* ---------- left column ---------- */
-function renderPlayers(g, a, ui, me) {
+function renderPlayers(g, a, ui, me, room) {
+  const members = room?.members || [];
+  const bySeat = (p) => members.find((m) => m.seat === p);
   const rows = g.players.map((pl, p) => {
-    const P = R.PLAYERS[p];
+    const P = who(p);
+    const member = bySeat(p);
     const visible = R.victoryPoints(g, p, false);
     const hidden = p === me ? R.victoryPoints(g, p, true) - visible : 0;
     const gained = g.gains?.[p] ? R.totalCards(g.gains[p]) : 0;
+    const away = member && !member.connected;
     const awards = [g.longest === p && h('span', { class: 'award', text: `Longest Road · ${g.roadLens[p]}` }), g.army === p && h('span', { class: 'award', text: `Largest Army · ${pl.knights}` })].filter(Boolean);
-    return h('button', {
-      type: 'button',
-      class: `player${g.cur === p ? ' current' : ''}`,
+    return h('div', {
+      class: `player${g.cur === p ? ' current' : ''}${away ? ' away' : ''}`,
       style: { '--pc': P.light ? P.edge : P.color },
-      title: `View the game from ${P.name}’s seat`,
-      'aria-label': `${P.name}: ${visible} points, ${R.totalCards(pl.res)} resource cards, ${pl.dev.length} development cards${g.cur === p ? ', playing now' : ''}${p === me ? ', your seat' : ''}. Click to view this seat.`,
-      'aria-pressed': String(p === me),
-      onClick: () => a.viewAs(p),
+      role: 'listitem',
+      'aria-label': `${P.name}: ${visible} points, ${count(pl)} resource cards, ${pl.dev.length} development cards${g.cur === p ? ', playing now' : ''}${p === me ? ', you' : ''}${away ? ', disconnected' : ''}`,
     },
       playerMark(P),
-      h('span', { class: 'player-name' }, h('span', { text: P.name }), p === me ? h('span', { class: 'tag you', text: 'You' }) : null, gained ? h('span', { class: 'gain-pop', text: `+${gained}` }) : null),
+      h('span', { class: 'player-name', title: member?.host ? `${P.name} is hosting this room` : null }, h('span', { text: P.name }), p === me ? h('span', { class: 'tag you', text: 'You' }) : null, away ? h('span', { class: 'tag away', text: 'Away' }) : null, gained ? h('span', { class: 'gain-pop', text: `+${gained}` }) : null),
       h('span', { class: 'vp', title: hidden ? `${visible} visible + ${hidden} hidden` : 'Victory points' }, h('b', { text: visible + hidden }), h('small', { text: 'VP' })),
       h('span', { class: 'player-stats' },
-        h('span', { class: 'stat', title: 'Resource cards' }, h('i', { class: 'card-glyph' }), String(R.totalCards(pl.res))),
+        h('span', { class: 'stat', title: 'Resource cards' }, h('i', { class: 'card-glyph' }), String(count(pl))),
         h('span', { class: 'stat', title: 'Development cards' }, h('i', { class: 'card-glyph dev' }), String(pl.dev.length)),
         h('span', { class: 'stat', title: 'Knights played' }, icon('knight'), String(pl.knights)),
         h('span', { class: 'stat', title: 'Longest road' }, icon('roads'), String(g.roadLens[p])),
@@ -200,9 +204,11 @@ function renderPlayers(g, a, ui, me) {
       awards.length ? h('span', { class: 'awards' }, awards) : null,
     );
   });
+  const watchers = members.filter((m) => m.role === 'spectator' || m.seat < 0 && room?.phase === 'game');
   $('players').replaceChildren(
-    panelTitle('Players', btn(ui.follow ? 'Seat follows turn' : 'Follow turn', a.toggleFollow, { class: 'linkish', title: 'Local testing: the view switches to whoever must act. Click a player to sit in their seat.' })),
-    ...rows,
+    panelTitle('Players', room ? h('small', { text: `Room ${room.code}` }) : null),
+    h('div', { class: 'player-list', role: 'list' }, ...rows),
+    watchers.length ? h('p', { class: 'watchers' }, h('span', { class: 'eye', 'aria-hidden': 'true' }), `Watching: ${watchers.map((m) => m.name + (m.connected ? '' : ' (away)')).join(', ')}`) : null,
   );
 }
 
@@ -236,7 +242,7 @@ function waitingText(g, me) {
 }
 
 function renderTurn(g, a, me) {
-  const P = R.PLAYERS[g.cur];
+  const P = who(g.cur);
   const mine = me === g.cur && g.mode !== 'discard';
   const blocking = R.isBlocking(g);
   const sub = g.phase === 'setup' ? 'Opening placements' : g.playerCount > 4 ? `Turn ${g.turn} · ${g.paired ? 'Player 2 · build only' : 'Player 1 · roll + build'}` : `Turn ${g.turn}`;
@@ -286,10 +292,10 @@ function renderTrade(g, a, ui, me) {
   ];
   if (!playersTab) {
     const t = g.trade;
-    const ratio = R.harborRatio(g, me, t.give);
+    const ratio = R.harborRatio(g, me ?? g.cur, t.give);
     content.push(
       h('div', { class: 'row-label' }, h('span', { text: 'You give' }), h('span', { text: 'rate' })),
-      h('div', { class: 'chips' }, ...R.RES.map((r) => h('button', { type: 'button', class: `chip${t.give === r ? ' active' : ''}`, 'aria-pressed': String(t.give === r), 'aria-label': `Give ${R.RES_NAME[r]} at ${R.harborRatio(g, me, r)} for 1`, disabled: !mine, onClick: () => a.setTrade({ give: r }) }, icon(r), h('span', { text: `${R.harborRatio(g, me, r)}:1` })))),
+      h('div', { class: 'chips' }, ...R.RES.map((r) => h('button', { type: 'button', class: `chip${t.give === r ? ' active' : ''}`, 'aria-pressed': String(t.give === r), 'aria-label': `Give ${R.RES_NAME[r]} at ${R.harborRatio(g, me ?? g.cur, r)} for 1`, disabled: !mine, onClick: () => a.setTrade({ give: r }) }, icon(r), h('span', { text: `${R.harborRatio(g, me ?? g.cur, r)}:1` })))),
       h('div', { class: 'row-label' }, h('span', { text: 'You get' }), h('span', { text: 'in bank' })),
       h('div', { class: 'chips' }, ...R.RES.map((r) => h('button', { type: 'button', class: `chip${t.get === r ? ' active' : ''}`, 'aria-pressed': String(t.get === r), 'aria-label': `Get ${R.RES_NAME[r]}, ${g.bank[r]} in the bank`, disabled: !mine, onClick: () => a.setTrade({ get: r }) }, icon(r), h('span', { text: g.bank[r] })))),
       h('div', { class: 'summary' },
@@ -311,6 +317,8 @@ function renderTrade(g, a, ui, me) {
         })),
         btn('Withdraw offer', a.withdraw, { class: 'linkish' }),
       ));
+    } else if (me === null) {
+      content.push(h('div', { class: 'offer well' }, h('div', { class: 'offer-line' }, mark(g.cur), h('b', { text: `${name(g.cur)} offers` })), h('div', { class: 'offer-line' }, h('span', { text: 'Gives' }), ...describe(o.give), h('span', { class: 'arrow', text: '→' }), h('span', { text: 'wants' }), ...describe(o.get))));
     } else if (ui.counter === me) {
       content.push(
         h('div', { class: 'row-label' }, h('span', { text: `You give ${name(g.cur)}` })),
@@ -348,6 +356,10 @@ function renderTrade(g, a, ui, me) {
 }
 
 function renderDevs(g, a, me) {
+  if (me === null) {
+    $('devs').replaceChildren(panelTitle('Development cards', h('small', { text: `${g.deck.length} in deck` })), h('p', { class: 'muted', text: 'You are watching this game. Players’ cards stay hidden.' }));
+    return;
+  }
   const pl = g.players[me];
   const mine = me === g.cur;
   const cards = R.DEV_TYPES.flatMap((type) => {
@@ -371,13 +383,18 @@ function renderDevs(g, a, me) {
 
 /* ---------- dock ---------- */
 function renderDock(g, a, me) {
-  const P = R.PLAYERS[me];
+  if (me === null) {
+    $('hand').replaceChildren(h('div', { class: 'spectating' }, h('span', { class: 'eye big', 'aria-hidden': 'true' }), h('div', {}, h('b', { text: 'You’re watching' }), h('p', { class: 'muted', text: 'You can see the board, trades and everyone’s public info. Hands stay hidden.' }))));
+    $('builds').replaceChildren();
+    return;
+  }
+  const P = who(me);
   const pl = g.players[me];
   const mine = me === g.cur;
   const picking = mine && (g.mode === 'plenty' || g.mode === 'monopoly');
   const gains = g.gains?.[me];
   $('hand').replaceChildren(
-    h('div', { class: 'hand-head' }, playerMark(P), h('span', { text: picking ? (g.mode === 'plenty' ? `Pick ${g.plentyLeft} from the bank` : 'Pick a resource to claim') : 'Your hand' }), h('small', { text: `${R.totalCards(pl.res)} cards` })),
+    h('div', { class: 'hand-head' }, playerMark(P), h('span', { text: picking ? (g.mode === 'plenty' ? `Pick ${g.plentyLeft} from the bank` : 'Pick a resource to claim') : 'Your hand' }), h('small', { text: `${count(pl)} cards` })),
     h('div', { class: 'cards' },
       ...R.RES.map((r) => {
         const n = pl.res[r];
@@ -427,28 +444,89 @@ function modal(title, content, a, closable = true) {
   );
 }
 
-function renderModal(g, a, ui, me) {
+const inviteLink = (room) => `${location.origin}/?room=${room.code}`;
+
+function nameField(ui, a, label = 'Your name') {
+  return h('label', { class: 'field' },
+    h('span', { text: label }),
+    h('input', { type: 'text', maxlength: '20', autocomplete: 'nickname', 'aria-label': label, value: ui.nameDraft ?? '', placeholder: 'e.g. Nawfal', onInput: (e) => a.draft({ nameDraft: e.target.value }) }),
+  );
+}
+
+function homeModal(a, ui) {
+  return modal('Play with friends', [
+    h('p', { text: 'Make a room, then send the link to your friends. Everyone plays from their own computer.' }),
+    nameField(ui, a),
+    btn('Create a room', a.createRoom, { class: 'btn wide', disabled: !(ui.nameDraft || '').trim() }),
+    h('div', { class: 'divider-text' }, h('span', { text: 'or join one' })),
+    h('div', { class: 'join-row' },
+      h('input', { type: 'text', maxlength: '6', 'aria-label': 'Room code', placeholder: 'Room code', value: ui.codeDraft ?? '', autocapitalize: 'characters', onInput: (e) => a.draft({ codeDraft: e.target.value.toUpperCase() }) }),
+      btn('Join', a.joinRoom, { class: 'btn wood', disabled: !(ui.nameDraft || '').trim() || (ui.codeDraft || '').trim().length < 4 }),
+    ),
+    ui.error ? h('p', { class: 'error', text: ui.error }) : null,
+  ], a, false);
+}
+
+function lobbyModal(a, ui, room) {
+  const you = room.you;
+  const seatedCount = room.members.filter((m) => m.role === 'player').length;
+  const watching = room.members.filter((m) => m.role === 'spectator');
+  const host = room.members.find((m) => m.host);
+  const colorButtons = R.PLAYERS.map((P, c) => {
+    const owner = room.members.find((m) => m.role === 'player' && m.color === c);
+    const mine = owner && owner.id === you.id;
+    return h('button', {
+      type: 'button',
+      class: `color-pick${mine ? ' mine' : ''}${owner && !mine ? ' taken' : ''}`,
+      style: { '--pc': P.light ? P.edge : P.color },
+      disabled: !!owner && !mine,
+      'aria-pressed': String(!!mine),
+      'aria-label': owner ? (mine ? `${P.name}: your colour` : `${P.name}: taken by ${owner.name}`) : `Play as ${P.name}`,
+      onClick: () => a.pickColor(c),
+    },
+      playerMark(P, 30),
+      h('span', { class: 'color-name', text: P.name }),
+      h('small', { text: owner ? (mine ? 'You' : owner.name) : 'Free' }),
+    );
+  });
+  return modal(`Room ${room.code}`, [
+    h('div', { class: 'invite well' },
+      h('div', {}, h('small', { text: 'Invite friends with this link' }), h('b', { class: 'invite-link', text: inviteLink(room) })),
+      btn(ui.copied ? 'Copied!' : 'Copy link', a.copyInvite, { class: 'btn small wood' }),
+    ),
+    h('div', { class: 'name-row' }, nameField(ui, a), btn('Save', a.saveName, { class: 'btn small wood', disabled: !(ui.nameDraft || '').trim() || ui.nameDraft.trim() === you.name })),
+    h('h3', { text: 'Pick your colour' }),
+    h('div', { class: 'color-grid' }, ...colorButtons),
+    h('div', { class: 'spectate-row' },
+      btn(you.role === 'spectator' ? 'You’re watching' : 'Just watch (spectate)', a.spectate, { class: `option${you.role === 'spectator' ? ' active' : ''}`, 'aria-pressed': String(you.role === 'spectator') }),
+      watching.length ? h('small', { text: `Watching: ${watching.map((m) => m.name).join(', ')}` }) : null,
+    ),
+    you.host
+      ? h('div', { class: 'host-box' },
+          h('h3', { text: 'Opening settlements' }),
+          h('div', { class: 'option-grid two' },
+            btn('Place them yourselves', () => a.setQuick(false), { class: `option${room.options.quick ? '' : ' active'}` }),
+            btn('Quick start', () => a.setQuick(true), { class: `option${room.options.quick ? ' active' : ''}` }),
+          ),
+          btn(seatedCount < 3 ? `Need ${3 - seatedCount} more player${3 - seatedCount > 1 ? 's' : ''}` : `Start game · ${seatedCount} players`, a.start, { class: 'btn wide', disabled: seatedCount < 3 || seatedCount > 6 }),
+        )
+      : h('p', { class: 'muted center', text: `${seatedCount} of 6 seats taken. Waiting for ${host ? host.name : 'the host'} to start…` }),
+  ], a, false);
+}
+
+function renderModal(g, a, ui, me, room) {
   let el = null;
-  if (ui.panel === 'new') {
-    el = modal('New island', [
-      h('h3', { text: 'Players' }),
-      h('div', { class: 'option-grid' }, ...[3, 4, 5, 6].map((n) => btn(String(n), () => a.ui({ count: n }), { class: `option${ui.count === n ? ' active' : ''}`, 'aria-pressed': String(ui.count === n), 'aria-label': `${n} players` }))),
-      h('div', { class: 'seat-row' }, ...R.PLAYERS.slice(0, ui.count).map((P) => playerMark(P))),
-      h('p', { class: 'muted', text: ui.count > 4 ? 'Large island · 30 tiles · paired turns for 5–6 players.' : 'Classic island · 19 tiles.' }),
-      h('h3', { text: 'Opening settlements' }),
-      h('div', { class: 'option-grid two' },
-        btn('Place them yourselves', () => a.ui({ quick: false }), { class: `option${ui.quick ? '' : ' active'}` }),
-        btn('Quick start', () => a.ui({ quick: true }), { class: `option${ui.quick ? ' active' : ''}` }),
-      ),
-      btn('Start game', a.newGame, { class: 'btn wide' }),
-    ], a, g.townList.length > 0);
+  if (!room) {
+    el = ui.status === 'connecting' ? modal('Connecting…', [h('p', { class: 'muted', text: 'Waking up the table. On a free server this can take up to a minute.' })], a, false) : homeModal(a, ui);
+  } else if (room.phase === 'lobby') {
+    el = lobbyModal(a, ui, room);
   } else if (g.winner !== null) {
     el = modal(`${name(g.winner)} wins!`, [
       h('div', { class: 'winner-art' }, mark(g.winner)),
       h('p', { text: `${R.victoryPoints(g, g.winner, true)} victory points, including ${g.players[g.winner].dev.filter((c) => c.type === 'vp').length} hidden point cards.` }),
-      btn('Play another island', () => a.ui({ panel: 'new' }), { class: 'btn wide' }),
+      room.you?.host ? btn('Back to the lobby', () => a.backToLobby(false), { class: 'btn wide' }) : h('p', { class: 'muted center', text: 'The host can start another island.' }),
     ], a, false);
-  } else if (g.mode === 'discard' && g.discards[0].p === me) {
+  } else if (g.mode === 'discard' && me !== null && g.discards[0].p === me) {
     const need = g.discards[0].n;
     el = modal('Return cards to the bank', [
       h('p', { text: `A 7 was rolled and you hold more than 7 cards. Choose exactly ${need} to return.` }),
@@ -458,10 +536,11 @@ function renderModal(g, a, ui, me) {
     ], a, false);
   } else if (ui.panel === 'menu') {
     el = modal('Menu', [
-      btn('New game', () => a.ui({ panel: 'new' }), { class: 'btn wide' }),
+      h('div', { class: 'invite well' }, h('div', {}, h('small', { text: `Room ${room.code}` }), h('b', { class: 'invite-link', text: inviteLink(room) })), btn(ui.copied ? 'Copied!' : 'Copy link', a.copyInvite, { class: 'btn small wood' })),
       btn('How to play', () => a.ui({ panel: 'help' }), { class: 'btn wood wide' }),
       btn('Full move history', () => a.ui({ panel: 'history' }), { class: 'btn wood wide' }),
-      h('p', { class: 'muted', text: `${g.playerCount} players · saved in this browser. Online rooms come next; for now, click a player on the left to see the game from their seat.` }),
+      room.you?.host ? btn('End this game and return to the lobby', () => a.backToLobby(true), { class: 'btn red wide' }) : null,
+      btn('Leave the room', a.leave, { class: 'linkish' }),
     ], a);
   } else if (ui.panel === 'help') {
     el = modal('How to play', [
@@ -478,19 +557,26 @@ function renderModal(g, a, ui, me) {
   for (const id of ['left', 'right', 'table', 'dock']) $(id).inert = !!el;
 }
 
-export function render(g, a, ui) {
-  const me = ui.seat;
-  const focused = document.activeElement?.getAttribute('aria-label');
+export function render(g, a, ui, room) {
+  G_NOW = g;
+  const me = room?.you && room.you.seat >= 0 ? room.you.seat : null;
+  const active = document.activeElement;
+  const focused = active?.getAttribute('aria-label');
+  const caret = active?.tagName === 'INPUT' ? active.selectionStart : null;
   renderBoard(g, a, me);
-  renderPlayers(g, a, ui, me);
+  renderPlayers(g, a, ui, me, room);
   renderBank(g);
   renderLog(g);
   renderTurn(g, a, me);
   renderTrade(g, a, ui, me);
   renderDevs(g, a, me);
   renderDock(g, a, me);
-  renderModal(g, a, ui, me);
-  if (focused) [...document.querySelectorAll('button[aria-label]')].find((e) => e.getAttribute('aria-label') === focused && !e.disabled)?.focus({ preventScroll: true });
+  renderModal(g, a, ui, me, room);
+  if (focused) {
+    const target = [...document.querySelectorAll('button[aria-label], input[aria-label]')].find((e) => e.getAttribute('aria-label') === focused && !e.disabled);
+    target?.focus({ preventScroll: true });
+    if (target && caret !== null) target.setSelectionRange(caret, caret);
+  }
   const dialog = document.querySelector('[role=dialog]');
-  if (dialog && !dialog.contains(document.activeElement)) dialog.querySelector('button:not(:disabled)')?.focus({ preventScroll: true });
+  if (dialog && !dialog.contains(document.activeElement)) dialog.querySelector('input, button:not(:disabled)')?.focus({ preventScroll: true });
 }
