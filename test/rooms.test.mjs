@@ -5,7 +5,7 @@ import * as R from '../public/js/rules.js';
 
 const tok = (n) => n.toString(16).padStart(32, '0');
 
-test('practice starts solo with legal stock and playable development cards', () => {
+test('practice starts with resources only and buys one hidden random development card', () => {
   const room = Rooms.createPracticeRoom(tok(90), 'Tester');
   assert.equal(room.phase, 'game');
   assert.equal(room.members.size, 1);
@@ -14,9 +14,13 @@ test('practice starts solo with legal stock and playable development cards', () 
   assert.equal(room.game.phase, 'main');
   assert.ok(R.validSavedGame(room.game));
   assert.deepEqual(room.game.players[0].res, Object.fromEntries(R.RES.map(r => [r, 12])));
-  for (const type of R.DEV_TYPES.filter(t => t !== 'vp')) assert.ok(R.canPlayDev(room.game, type));
+  assert.equal(room.game.players[0].dev.length, 0);
+  assert.equal(room.game.deck.length, 25);
+  const drawn = room.game.deck.at(-1);
   assert.equal(Rooms.act(room, tok(90), 'buyDevCard'), true);
-  assert.equal(room.game.players[0].dev.length, 6);
+  assert.deepEqual(room.game.players[0].dev, [{ type: drawn, turn: room.game.turn }]);
+  assert.equal(room.game.deck.length, 24);
+  assert.equal(R.canPlayDev(room.game, drawn), false);
   assert.equal(Rooms.lobby(room, tok(90), { type: 'practiceRefill' }), true);
   assert.equal(room.game.players[0].res.ore, 12);
   assert.ok(R.validSavedGame(room.game));
@@ -39,6 +43,7 @@ test('practice permissions cannot grant resources or reset a normal room', () =>
   assert.equal(Rooms.lobby(normal, tok(1), { type: 'practiceRefill' }), false);
   assert.deepEqual(normal.game.players, JSON.parse(before).players);
   const practice = Rooms.createPracticeRoom(tok(91));
+  assert.equal(Rooms.act(practice, tok(91), 'buyDevCard'), true);
   Rooms.join(practice, tok(92), 'Watcher');
   assert.equal(Rooms.lobby(practice, tok(92), { type: 'practiceRefill' }), false);
   assert.equal(Rooms.lobby(practice, tok(92), { type: 'practiceReset' }), false);
@@ -58,7 +63,7 @@ test('practice refills cannot bypass pending resolutions and practice survives r
   assert.ok(R.validSavedGame(restored.game));
   assert.equal(Rooms.lobby(restored, tok(93), { type: 'practiceReset' }), true);
   assert.equal(restored.game.mode, null);
-  assert.equal(restored.game.players[0].dev.length, 5);
+  assert.equal(restored.game.players[0].dev.length, 0);
   assert.equal(restored.game.cur, 0);
   assert.equal(restored.game.phase, 'main');
   assert.ok(R.validSavedGame(restored.game));

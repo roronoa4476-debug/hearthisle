@@ -112,10 +112,6 @@ function startPractice(room, token) {
   // The first action phase is ready to try; subsequent turns use ordinary dice/rules.
   room.game.phase = 'main';
   room.game.log[0] = { ...room.game.log[0], text: 'Solo practice ready: build, trade with the bank, or try a development card.' };
-  for (const type of R.DEV_TYPES) {
-    room.game.deck.splice(room.game.deck.indexOf(type), 1);
-    room.game.players[0].dev.push({ type, turn: 0 });
-  }
   stockPractice(room);
 }
 
