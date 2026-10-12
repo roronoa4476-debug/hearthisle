@@ -35,7 +35,7 @@ export function player(g, p) {
 }
 export const SETUP_ORDER = [0, 1, 2, 3, 3, 2, 1, 0];
 export const DEV_TYPES = ['knight', 'roads', 'plenty', 'monopoly', 'vp'];
-export const DEV_NAME = { knight: 'Knight', roads: 'Road Building', plenty: 'Invention', monopoly: 'Monopoly', vp: 'Victory Point' };
+export const DEV_NAME = { knight: 'Knight', roads: 'Road Building', plenty: 'Year of Plenty', monopoly: 'Monopoly', vp: 'Victory Point' };
 export const DEV_TEXT = {
   knight: 'Move the robber and steal one card.',
   roads: 'Place two roads at no cost.',
@@ -80,8 +80,17 @@ export const rollDice = (rng = Math.random) => [1 + Math.floor(rng() * 6), 1 + M
 function log(g, text, who = g.cur) {
   g.log = [{ id: ++g.serial, text, color: player(g, who).color }, ...g.log].slice(0, 60);
 }
-function toast(g, text) {
-  g.toast = { id: ++g.serial, text };
+// Notices. `text` is what everyone sees (null = nothing); `only` holds private
+// texts for particular seats, e.g. the card you drew. The server sends each
+// person only their own version, so private details never leave the server.
+function toast(g, text, only = null) {
+  g.toast = { id: ++g.serial, text, ...(only ? { only } : {}) };
+}
+const tell = (g, p, text) => toast(g, null, { [p]: text }); // just for one seat
+export function noticeFor(t, seat) {
+  if (!t) return null;
+  const text = t.only && seat !== null && seat !== undefined && t.only[seat] !== undefined ? t.only[seat] : t.text;
+  return text ? { id: t.id, text } : null;
 }
 
 /* ---------- board creation ---------- */
@@ -222,7 +231,7 @@ export function prompt(g) {
   }
   if (g.rolling) return 'The dice are rolling…';
   switch (g.mode) {
-    case 'discard': return `${player(g, g.discards[0].p).name}: choose ${g.discards[0].n} cards to return to the bank.`;
+    case 'discard': return `Waiting for ${g.discards.map(d=>player(g,d.p).name).join(' and ')} to discard.`;
     case 'robber': return 'Choose a tile for the robber.';
     case 'steal': return 'Choose a player to steal from.';
     case 'plenty': return `Pick ${g.plentyLeft} resource${g.plentyLeft > 1 ? 's' : ''} from the bank.`;
@@ -279,7 +288,10 @@ function steal(g, from, rng) {
   const k = pool[Math.floor(rng() * pool.length)];
   r[k]--;
   g.players[g.cur].res[k]++;
-  toast(g, `You took 1 ${RES_NAME[k]} from ${player(g, from).name}.`);
+  toast(g, `${player(g, g.cur).name} stole a card from ${player(g, from).name}.`, {
+    [g.cur]: `You took 1 ${RES_NAME[k]} from ${player(g, from).name}.`,
+    [from]: `${player(g, g.cur).name} took 1 ${RES_NAME[k]} from you.`,
+  });
   log(g, `${player(g, g.cur).name} stole a card from ${player(g, from).name}.`);
 }
 function vertexScore(g, vid) {
@@ -403,7 +415,7 @@ export function resolveRoll(s, dice, rng = Math.random) {
     g.discards=g.players.flatMap((pl,p)=>totalCards(pl.res)>7?[{p,n:Math.floor(totalCards(pl.res)/2)}]:[]);
     g.mode=g.discards.length?'discard':'robber';
     log(g, `${me} rolled 7.`);
-    toast(g, 'Seven! Move the robber to a new tile.');
+    toast(g, g.mode === 'discard' ? `Seven! Players with more than 7 cards return half.` : `Seven! ${me} moves the robber.`, { [g.cur]: g.mode === 'discard' ? 'Seven! Waiting for discards, then move the robber.' : 'Seven! Move the robber to a new tile.' });
     return g;
   }
   const gains = g.players.map(() => emptyRes());
@@ -430,8 +442,10 @@ export function resolveRoll(s, dice, rng = Math.random) {
   g.gains=gains;
   g.producing = producing;
   const describe = (gr) => RES.filter((r) => gr[r]).map((r) => `${gr[r]} ${RES_NAME[r]}`).join(', ');
-  const mine = describe(gains[g.cur]);
-  toast(g, mine ? `Rolled ${sum} — you collect ${mine}.` : `Rolled ${sum} — nothing for you this time.`);
+  const personal = {};
+  gains.forEach((gr, i) => { if (describe(gr)) personal[i] = `Rolled ${sum} — you collect ${describe(gr)}.`; });
+  if (personal[g.cur] === undefined) personal[g.cur] = `Rolled ${sum} — nothing for you this time.`;
+  toast(g, `${me} rolled ${sum}.`, personal);
   const all = gains.map((gr, i) => (describe(gr) ? `${player(g, i).name} +${describe(gr)}` : '')).filter(Boolean).join('; ');
   log(g, `${me} rolled ${sum}${all ? `: ${all}` : '.'}${shortages.length?` Bank shortage: ${shortages.join(', ')}.`:''}`);
   return g;
@@ -477,7 +491,7 @@ function cancelUnaffordableBuild(g) {
   if (!['road', 'settlement', 'city'].includes(kind) || canCompleteBuild(g, kind)) return;
   g.mode = null;
   g.freeRoads = 0;
-  toast(g, `Trade complete. You no longer have enough resources for that ${BUILD_NAME[kind].toLowerCase()}.`);
+  tell(g, g.cur, `Trade complete. You no longer have enough resources for that ${BUILD_NAME[kind].toLowerCase()}.`);
 }
 
 export function chooseBuild(s, kind) {
@@ -491,14 +505,14 @@ export function chooseBuild(s, kind) {
   }
   if(!['road','settlement','city'].includes(kind)) return s;
   const noun = BUILD_NAME[kind].toLowerCase();
-  if (g.phase !== 'main') return toast(g, 'Roll the dice before you build.'), g;
-  if (!afford(g.players[p].res, COST[kind])) return toast(g, `A ${noun} costs ${costText(COST[kind])}.`), g;
-  if (piecesLeft(g, p)[kind] <= 0) return toast(g, `No ${kind === 'city' ? 'cities' : `${noun}s`} left in your supply.`), g;
+  if (g.phase !== 'main') return tell(g, p, 'Roll the dice before you build.'), g;
+  if (!afford(g.players[p].res, COST[kind])) return tell(g, p, `A ${noun} costs ${costText(COST[kind])}.`), g;
+  if (piecesLeft(g, p)[kind] <= 0) return tell(g, p, `No ${kind === 'city' ? 'cities' : `${noun}s`} left in your supply.`), g;
   g.mode = kind;
   const any = kind === 'road' ? validEdges(g).length : validVertices(g).length;
   if (!any) {
     g.mode = null;
-    toast(g, `There is no legal spot for a ${noun} yet.`);
+    tell(g, p, `There is no legal spot for a ${noun} yet.`);
   }
   return g;
 }
@@ -612,14 +626,14 @@ export function buyDevCard(s) {
   const g = clone(s);
   const p = g.cur;
   const pl = g.players[p];
-  if (g.phase !== 'main') return toast(g, 'Roll the dice before you buy.'), g;
-  if (!g.deck.length) return toast(g, 'The development deck is empty.'), g;
-  if (!afford(pl.res, COST.dev)) return toast(g, `A development card costs ${costText(COST.dev)}.`), g;
+  if (g.phase !== 'main') return tell(g, p, 'Roll the dice before you buy.'), g;
+  if (!g.deck.length) return tell(g, p, 'The development deck is empty.'), g;
+  if (!afford(pl.res, COST.dev)) return tell(g, p, `A development card costs ${costText(COST.dev)}.`), g;
   payBank(g,p,COST.dev);
   const card = g.deck.pop();
   pl.dev.push({ type: card, turn: g.turn });
   g.mode = null;
-  toast(g, `You drew ${DEV_NAME[card]}.`);
+  toast(g, `${player(g, p).name} bought a development card.`, { [p]: `You drew ${DEV_NAME[card]}.` });
   log(g, `${player(g, p).name} bought a development card.`);
   checkWin(g);
   return g;
@@ -637,7 +651,7 @@ export function playDevCard(s, type) {
     pl.knights++;
     updateArmy(g);
     g.mode = 'robber';
-    toast(g, 'Knight played — move the robber.');
+    toast(g, `${name} played a Knight.`, { [p]: 'Knight played — move the robber.' });
     log(g, `${name} played a Knight.`);
   } else if (type === 'roads') {
     g.freeRoads = Math.min(2, piecesLeft(g, p).road);
@@ -646,16 +660,16 @@ export function playDevCard(s, type) {
       g.mode = null;
       g.freeRoads = 0;
     }
-    toast(g, 'Place up to two free roads.');
+    toast(g, `${name} played Road Building.`, { [p]: 'Place up to two free roads.' });
     log(g, `${name} played Road Building.`);
   } else if (type === 'plenty') {
     g.plentyLeft = Math.min(2,totalCards(g.bank));
     g.mode = g.plentyLeft ? 'plenty' : null;
-    toast(g, 'Choose two resources from the bank.');
+    toast(g, `${name} played Year of Plenty.`, { [p]: 'Choose two resources from the bank.' });
     log(g, `${name} played Year of Plenty.`);
   } else if (type === 'monopoly') {
     g.mode = 'monopoly';
-    toast(g, 'Choose a resource to claim.');
+    toast(g, `${name} played Monopoly.`, { [p]: 'Choose a resource to claim.' });
     log(g, `${name} played Monopoly.`);
   }
   checkWin(g);
@@ -736,11 +750,15 @@ export function acceptOffer(s, q) {
 // All resource payments go back to the finite supply.
 function payBank(g,p,cost){pay(g.players[p].res,cost);for(const r of Object.keys(cost)) g.bank[r]+=cost[r];}
 export function handOwner(g){return g.mode==='discard'?g.discards[0].p:g.cur;}
-export function discardCards(s,cards){
+export const mustDiscard=(g,p)=>g.mode==='discard'&&g.discards.some(d=>d.p===p);
+// Everyone who must discard on a 7 can do so at the same time, in any order.
+export function discardCards(s,cards,who=s.discards?.[0]?.p){
   if(s.mode!=='discard'||s.winner!==null||!validBasket(cards))return s;
-  const {p,n}=s.discards[0];
+  const i=s.discards.findIndex(d=>d.p===who);
+  if(i<0)return s;
+  const {p,n}=s.discards[i];
   if(totalCards(cards)!==n||!afford(s.players[p].res,cards))return s;
-  const g=clone(s);payBank(g,p,cards);g.discards.shift();g.mode=g.discards.length?'discard':'robber';
+  const g=clone(s);payBank(g,p,cards);g.discards.splice(i,1);g.mode=g.discards.length?'discard':'robber';
   log(g,`${player(g, p).name} discarded ${n} cards.`,p);return g;
 }
 export function updateAwards(s){const g=clone(s);updateLongest(g);checkWin(g);return g;}

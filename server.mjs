@@ -80,6 +80,7 @@ export function createApp() {
 /* ---------- WebSocket rooms ---------- */
 function attachRooms(server) {
   const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 512 * 1024 });
+  server.wss = wss;
   const sockets = new Map(); // room code -> Set of { ws, token }
 
   const send = (ws, msg) => {
@@ -92,8 +93,16 @@ function attachRooms(server) {
     } catch (err) {
       console.error('snapshot failed', err);
     }
-    for (const c of sockets.get(room.code) || []) {
+    const set = sockets.get(room.code) || new Set();
+    for (const c of set) {
       try {
+        if (!room.members.has(c.token)) {
+          // removed by the host: tell them and drop the connection
+          send(c.ws, { type: 'error', code: 'removed', message: 'The host removed you from this room.' });
+          set.delete(c);
+          c.ws.close();
+          continue;
+        }
         send(c.ws, { ...Rooms.viewFor(room, c.token), snapshot });
       } catch (err) {
         console.error('send failed', err);
@@ -105,6 +114,8 @@ function attachRooms(server) {
     let room = null;
     let token = null;
     let budget = 40; // simple flood protection: messages per 5 seconds
+    let lastAction = '';
+    let lastActionAt = 0;
     ws.isAlive = true;
     ws.on('pong', () => (ws.isAlive = true));
 
@@ -140,13 +151,15 @@ function attachRooms(server) {
           }
         }
         if (!room) {
-          room = null;
-          return send(ws, { type: 'error', code: 'no-room', message: 'That room doesn’t exist any more. Create a new one.' });
+          return send(ws, msg.room
+            ? { type: 'error', code: 'no-room', message: 'That room doesn’t exist any more. Create a new one.' }
+            : { type: 'error', message: 'The server is busy right now. Try again in a minute.' });
         }
         const member = Rooms.join(room, token, msg.name);
         if (!member) {
+          const removed = room.removed?.has(token);
           room = null;
-          return send(ws, { type: 'error', message: 'That room is full.' });
+          return send(ws, { type: 'error', code: removed ? 'removed' : 'full', message: removed ? 'The host removed you from this room.' : 'That room is full.' });
         }
         if (!sockets.has(room.code)) sockets.set(room.code, new Set());
         sockets.get(room.code).add({ ws, token });
@@ -154,8 +167,13 @@ function attachRooms(server) {
         Rooms.connected(room, token, +1);
         return;
       }
-      if (!room) return;
+      if (!room || msg.type === 'ping') return; // keep-alive from the browser
       if (msg.type === 'action') {
+        // Ignore an exact repeat within a moment (a double-click must not trade twice).
+        const key = JSON.stringify([msg.name, msg.args]);
+        if (key === lastAction && Date.now() - lastActionAt < 400) return;
+        lastAction = key;
+        lastActionAt = Date.now();
         Rooms.act(room, token, String(msg.name), Array.isArray(msg.args) ? msg.args : []);
       } else {
         Rooms.lobby(room, token, msg);

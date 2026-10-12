@@ -7,6 +7,9 @@ import * as R from '../public/js/rules.js';
 export const COLORS = R.PLAYERS.map((p) => p.name); // 6 colours, index = colour id
 const CODE_LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const MAX_MEMBERS = 16;
+const MAX_ROOMS = 500; // protects a small free server from someone spamming new rooms
+const RESTORE_HOLD_MS = 8000; // after a restart, wait for everyone's backups before play resumes
+const BACKUP_MAX_AGE_MS = 3 * 24 * 60 * 60 * 1000;
 const ROLL_MS = 550;
 const PRODUCE_MS = 2200;
 
@@ -29,7 +32,8 @@ export function getRoom(code) {
   return rooms.get(cleanCode(code));
 }
 
-export function createRoom() {
+export function createRoom({ force = false } = {}) {
+  if (!force && rooms.size >= MAX_ROOMS) return null;
   const room = {
     code: makeCode(),
     members: new Map(), // token -> member
@@ -50,6 +54,7 @@ export function createRoom() {
 /** Join or re-join. Returns the member. */
 export function join(room, token, name) {
   room.touched = Date.now();
+  if (room.removed?.has(token)) return null; // the host removed this person
   let m = room.members.get(token);
   if (!m) {
     if (room.members.size >= MAX_MEMBERS) return null;
@@ -74,10 +79,24 @@ export const seated = (room) => [...room.members.values()].filter((m) => m.role 
 export const freeColors = (room) => COLORS.map((_, i) => i).filter((c) => !seated(room).some((m) => m.color === c));
 export const seatOf = (room, token) => (room.game ? room.seatTokens.indexOf(token) : -1);
 
-function changed(room) {
+function changed(room, meaningful = true) {
   room.touched = Date.now();
-  room.version++;
+  if (meaningful) {
+    room.version++;
+    room.playedSinceRestore = true;
+  }
   for (const fn of room.listeners) fn(room);
+}
+
+/** After a restart, hold moves until every seated player is back or a few seconds pass. */
+export function holding(room) {
+  if (!room.holdUntil) return false;
+  const everyoneBack = room.seatTokens.every((t) => room.members.get(t)?.connected > 0);
+  if (everyoneBack || Date.now() >= room.holdUntil) {
+    room.holdUntil = 0;
+    return false;
+  }
+  return true;
 }
 
 /* ---------- lobby ---------- */
@@ -98,6 +117,15 @@ export function lobby(room, token, msg) {
       if (seated(room).some((o) => o !== m && o.color === msg.color)) return false; // taken
       m.color = msg.color;
       m.role = 'player';
+      break;
+    }
+    case 'remove': {
+      if (!isHost || room.phase !== 'lobby') return false;
+      const target = [...room.members.values()].find((x) => x.id === msg.id);
+      if (!target || target.token === room.hostToken) return false;
+      room.members.delete(target.token);
+      room.removed = room.removed || new Set();
+      room.removed.add(target.token);
       break;
     }
     case 'spectate':
@@ -147,9 +175,10 @@ export function act(room, token, name, args = []) {
   if (seat < 0) return false; // spectators can't act
   let next = g;
   try {
+    if (holding(room)) return false;
     if (name === 'discard') {
-      if (g.mode !== 'discard' || g.discards[0]?.p !== seat) return false;
-      next = R.discardCards(g, basket(args[0]));
+      if (!R.mustDiscard(g, seat)) return false;
+      next = R.discardCards(g, basket(args[0]), seat);
     } else if (name === 'respond') {
       next = R.respondTrade(g, seat, !!args[0]);
     } else if (name === 'counter') {
@@ -210,7 +239,7 @@ function roll(room) {
       const cleared = R.clearProducing(room.game);
       if (cleared !== room.game) {
         room.game = cleared;
-        changed(room);
+        changed(room, false);
       }
     }, PRODUCE_MS);
   }, ROLL_MS);
@@ -227,6 +256,7 @@ export function viewFor(room, token) {
     const reveal = g.winner !== null;
     game = {
       ...g,
+      toast: R.noticeFor(g.toast, seat >= 0 ? seat : null),
       deck: g.deck.map(() => null),
       players: g.players.map((pl, i) =>
         i === seat || reveal
@@ -241,6 +271,8 @@ export function viewFor(room, token) {
       code: room.code,
       phase: room.phase,
       options: room.options,
+      version: room.version,
+      restoring: holding(room),
       you: me ? { id: me.id, name: me.name, color: me.color, role: me.role, seat, host: room.hostToken === token } : null,
       members: [...room.members.values()]
         .sort((a, b) => a.joined - b.joined)
@@ -256,7 +288,7 @@ export function connected(room, token, delta) {
   m.connected = Math.max(0, m.connected + delta);
   // The host never changes: whoever created the room stays host, even while
   // they refresh or drop out. Their seat and host role wait for them.
-  changed(room);
+  changed(room, false);
 }
 
 /** Forget rooms nobody has touched for a while. */
@@ -277,6 +309,7 @@ export function snapshotOf(room) {
     v: 1,
     code: room.code,
     version: room.version,
+    savedAt: Date.now(),
     hostToken: room.hostToken,
     phase: room.phase,
     options: room.options,
@@ -289,20 +322,26 @@ export function snapshotOf(room) {
 /** Rebuild a room from a sealed copy a browser handed back. Returns the room or null. */
 export function restoreRoom(data) {
   if (!data || data.v !== 1 || typeof data.code !== 'string' || !Array.isArray(data.members)) return null;
+  if (!Number.isInteger(data.version) || Date.now() - (data.savedAt || 0) > BACKUP_MAX_AGE_MS) return rooms.get(data.code) || null;
   const existing = rooms.get(data.code);
-  // A room already running is the truth, unless it was itself just restored
-  // from an older copy and nothing has happened since.
-  if (existing && !(existing.restoredFrom === existing.version && data.version > existing.version)) return existing;
+  // A running room is the truth, unless it was itself restored from a backup
+  // and nobody has played since: then a newer backup replaces it.
+  if (existing && !(existing.restoredFrom !== undefined && !existing.playedSinceRestore && data.version > existing.version)) return existing;
   if (data.game && !R.validSavedGame(data.game)) return existing || null;
+  const live = existing ? existing.members : new Map(); // keep counts for people already reconnected
   const room = existing || createRoomWithCode(data.code);
   room.hostToken = data.hostToken;
   room.phase = data.phase === 'game' && data.game ? 'game' : 'lobby';
   room.options = { quick: !!data.options?.quick };
   room.game = room.phase === 'game' ? data.game : null;
   room.seatTokens = Array.isArray(data.seatTokens) ? data.seatTokens : [];
-  room.members = new Map(data.members.map((m) => [m.token, { ...m, connected: 0 }]));
+  room.members = new Map(data.members.map((m) => [m.token, { ...m, connected: live.get(m.token)?.connected || 0 }]));
   room.version = data.version;
   room.restoredFrom = data.version;
+  room.playedSinceRestore = false;
+  room.holdUntil = room.phase === 'game' ? Date.now() + RESTORE_HOLD_MS : 0;
+  clearTimeout(room.timers.hold);
+  if (room.holdUntil) room.timers.hold = setTimeout(() => changed(room, false), RESTORE_HOLD_MS + 100).unref(); // tell everyone play has resumed
   if (room.game) {
     // Finish anything that was mid-animation when the server stopped.
     if (room.game.rolling) room.game = R.resolveRoll({ ...room.game, rolling: false }, room.game.dice, secureRandom);
@@ -312,7 +351,7 @@ export function restoreRoom(data) {
 }
 
 function createRoomWithCode(code) {
-  const room = createRoom();
+  const room = createRoom({ force: true });
   rooms.delete(room.code);
   room.code = code;
   rooms.set(code, room);

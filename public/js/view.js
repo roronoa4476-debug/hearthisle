@@ -28,6 +28,7 @@ function h(tag, props = {}, ...children) {
 }
 const btn = (text, onClick, props = {}) => h('button', { type: 'button', text, onClick, ...props });
 const icon = (name, extra = '') => h('span', { class: `icon i-${name}${extra ? ` ${extra}` : ''}`, 'aria-hidden': 'true' });
+let RESTORING = false; // true for a few seconds after a server restart
 let G_NOW = null; // the game being drawn; seats carry each player's chosen name and colour
 const who = (p) => R.player(G_NOW, p);
 const mark = (p) => playerMark(who(p));
@@ -167,11 +168,8 @@ function renderBoard(g, a, me) {
 }
 
 // Notices are written for the acting player; other seats get a neutral version.
-function noticeFor(g, me) {
-  const text = g.toast?.text || '';
-  if (!text || me === g.cur) return text;
-  if (/^You (drew|took)/.test(text)) return '';
-  return text.replace(/ — (you|nothing for you).*$/, '.').replace(/^Choose .*$/, '');
+function noticeFor(g) {
+  return g.toast?.text || '';
 }
 
 /* ---------- left column ---------- */
@@ -234,8 +232,9 @@ function renderLog(g) {
 function waitingText(g, me) {
   if (g.winner !== null) return R.prompt(g);
   if (g.mode === 'discard') {
-    const d = g.discards[0];
-    return d.p === me ? `Choose ${d.n} cards to return to the bank.` : `Waiting for ${name(d.p)} to discard.`;
+    const mine = g.discards.find((d) => d.p === me);
+    if (mine) return `Choose ${mine.n} cards to return to the bank.`;
+    return `Waiting for ${g.discards.map((d) => name(d.p)).join(' and ')} to discard.`;
   }
   if (g.offer && me !== g.cur) return `${name(g.cur)} is offering a trade — answer it in the trade panel.`;
   return `Waiting for ${name(g.cur)}…`;
@@ -255,7 +254,7 @@ function renderTurn(g, a, me) {
   if (mine && !blocking && g.phase === 'main' && ['road', 'settlement', 'city'].includes(g.mode)) extra.push(btn('Cancel building (Esc)', a.cancelBuild, { class: 'linkish' }));
   $('turn').replaceChildren(
     h('div', { class: 'turn-head' }, playerMark(P), h('div', {}, h('div', { class: 'turn-name', text: g.cur === me ? 'Your turn' : `${P.name}’s turn` }), h('div', { class: 'turn-sub', text: sub }))),
-    h('p', { class: `prompt well${mine ? ' mine' : ''}`, text: mine ? R.prompt(g) : waitingText(g, me) }),
+    h('p', { class: `prompt well${mine && !RESTORING ? ' mine' : ''}`, text: RESTORING ? 'The server restarted. Restoring the game while everyone reconnects…' : mine ? R.prompt(g) : waitingText(g, me) }),
     h('div', { class: 'turn-row' },
       h('div', { class: `dice${g.rolling ? ' rolling' : ''}`, role: 'img', 'aria-label': `Dice show ${g.dice[0]} and ${g.dice[1]}` }, ...g.dice.map((n, i) => h('span', { class: `die${i ? ' red' : ''}` }, ...Array.from({ length: 9 }, (_, k) => h('i', { class: FACES[n].includes(k) ? 'on' : '' }))))),
       rollPhase && g.phase === 'setup' ? h('span', { class: 'muted', text: 'Place on the board' }) : mainBtn,
@@ -324,7 +323,7 @@ function renderTrade(g, a, ui, me) {
         h('div', { class: 'row-label' }, h('span', { text: `You give ${name(g.cur)}` })),
         basketChips(ui.get, (r, d) => a.ui({ get: { ...ui.get, [r]: Math.max(0, ui.get[r] + d) } }), g.players[me].res),
         h('div', { class: 'row-label' }, h('span', { text: 'You get' })),
-        basketChips(ui.give, (r, d) => a.ui({ give: { ...ui.give, [r]: Math.max(0, ui.give[r] + d) } }), g.players[g.cur].res),
+        basketChips(ui.give, (r, d) => a.ui({ give: { ...ui.give, [r]: Math.max(0, ui.give[r] + d) } })),
         h('div', { class: 'summary' }, btn('Cancel', () => a.ui({ counter: null }), { class: 'linkish' }), btn('Send counter', () => a.counter(me), { class: 'btn small', disabled: !R.validExchange(ui.give, ui.get) || !R.afford(g.players[me].res, ui.get) })),
       );
     } else {
@@ -367,7 +366,7 @@ function renderDevs(g, a, me) {
     if (!list.length) return [];
     const playable = mine && R.canPlayDev(g, type);
     const note = type === 'vp' ? 'Hidden point' : !mine ? 'On your turn' : list.every((c) => c.turn >= g.turn) ? 'Next turn' : g.devPlayed ? 'One per turn' : 'Not now';
-    return [h('div', { class: `dev${type === 'vp' ? ' vp' : ''}`, title: R.DEV_TEXT[type] },
+    return [h('div', { class: `dev${type === 'vp' ? ' dev-vp' : ''}`, title: R.DEV_TEXT[type] },
       icon(type),
       h('b', { text: `${R.DEV_NAME[type]}${list.length > 1 ? ` ×${list.length}` : ''}` }),
       playable ? btn('Play', () => a.playDevCard(type), { class: 'btn small' }) : h('small', { text: note }),
@@ -501,6 +500,14 @@ function lobbyModal(a, ui, room) {
       btn(you.role === 'spectator' ? 'You’re watching' : 'Just watch (spectate)', a.spectate, { class: `option${you.role === 'spectator' ? ' active' : ''}`, 'aria-pressed': String(you.role === 'spectator') }),
       watching.length ? h('small', { text: `Watching: ${watching.map((m) => m.name).join(', ')}` }) : null,
     ),
+    you.host && room.members.length > 1
+      ? h('div', { class: 'people' },
+          h('small', { text: 'In the room' }),
+          ...room.members.filter((m) => m.id !== you.id).map((m) =>
+            h('span', { class: `person${m.connected ? '' : ' away'}` }, m.name, btn('×', () => a.remove(m.id, m.name), { class: 'remove', 'aria-label': `Remove ${m.name} from the room`, title: `Remove ${m.name}` })),
+          ),
+        )
+      : null,
     you.host
       ? h('div', { class: 'host-box' },
           h('h3', { text: 'Opening settlements' }),
@@ -532,8 +539,8 @@ function renderModal(g, a, ui, me, room) {
       h('p', { text: `${R.victoryPoints(g, g.winner, true)} victory points, including ${g.players[g.winner].dev.filter((c) => c.type === 'vp').length} hidden point cards.` }),
       room.you?.host ? btn('Back to the lobby', () => a.backToLobby(false), { class: 'btn wide' }) : h('p', { class: 'muted center', text: 'The host can start another island.' }),
     ], a, false);
-  } else if (g.mode === 'discard' && me !== null && g.discards[0].p === me) {
-    const need = g.discards[0].n;
+  } else if (me !== null && R.mustDiscard(g, me)) {
+    const need = g.discards.find((d) => d.p === me).n;
     el = modal('Return cards to the bank', [
       h('p', { text: `A 7 was rolled and you hold more than 7 cards. Choose exactly ${need} to return.` }),
       basketChips(ui.discard, (r, d) => a.ui({ discard: { ...ui.discard, [r]: Math.max(0, ui.discard[r] + d) } }), g.players[me].res),
@@ -565,6 +572,7 @@ function renderModal(g, a, ui, me, room) {
 
 export function render(g, a, ui, room) {
   G_NOW = g;
+  RESTORING = !!room?.restoring;
   const me = room?.you && room.you.seat >= 0 ? room.you.seat : null;
   const active = document.activeElement;
   const focused = active?.getAttribute('aria-label');

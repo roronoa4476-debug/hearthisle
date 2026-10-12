@@ -389,7 +389,7 @@ h1, h2, h3, p { margin: 0; }
 .dev b { font-size: 12px; font-weight: 900; line-height: 1.1; }
 .dev .btn { min-height: 24px; height: 24px; padding: 0 8px; font-size: 11.5px; border-radius: 6px; justify-self: start; }
 .dev small { font-size: 10.5px; font-weight: 800; color: #6a4e90; line-height: 1.2; }
-.dev.vp { background: #fff6d6; box-shadow: inset 0 0 0 1.5px #d4a12c, 0 2px 0 rgba(140, 100, 20, 0.35); }
+.dev.dev-vp { background: #fff6d6; box-shadow: inset 0 0 0 1.5px #d4a12c, 0 2px 0 rgba(140, 100, 20, 0.35); }
 
 /* ---------- modals ---------- */
 .shade { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; background: rgba(60, 34, 12, 0.42); }
@@ -493,3 +493,17 @@ input[type='text']:focus { outline: none; box-shadow: inset 0 1px 3px rgba(110, 
 .host-box { display: flex; flex-direction: column; gap: 8px; padding-top: 4px; border-top: 1px solid rgba(110, 62, 24, 0.3); }
 .center { text-align: center; }
 .modal { width: min(520px, calc(100vw - 32px)); }
+
+/* ---------- lobby: people list for the host ---------- */
+.people { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.people small { font-size: 11px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-soft); margin-right: 2px; }
+.person { display: inline-flex; align-items: center; gap: 2px; padding: 2px 3px 2px 9px; border-radius: 999px; font-size: 12.5px; font-weight: 800; background: rgba(255, 250, 236, 0.9); box-shadow: inset 0 0 0 1px rgba(110, 62, 24, 0.3); }
+.person.away { opacity: 0.6; }
+.person .remove { width: 22px; height: 22px; border: 0; border-radius: 50%; background: transparent; font-size: 15px; line-height: 1; color: var(--danger); }
+.person .remove:hover { background: #fde3df; }
+/* while a move is on its way to the server, ignore extra clicks */
+body.busy #board .layer button, body.busy #dock button, body.busy #right button { pointer-events: none; }
+/* dev cards keep their natural height instead of being squashed by the panel */
+.dev-list { flex-shrink: 0; align-content: start; }
+.dev { align-items: start; }
+.dev .icon { align-self: center; }

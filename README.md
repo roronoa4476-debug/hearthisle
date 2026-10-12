@@ -16,14 +16,14 @@ Settle an island, roll for resources, trade with each other and the bank, build 
 - **One screen, no scrolling:** the board, your hand, the bank, players, trading and dev cards all fit at once, down to a 1280×720 laptop.
 - **Original art:** illustrated terrain tiles, detailed resource icons, and wooden pieces in six colours (Red, Blue, White, Orange, Green, Purple). Each colour also has its own symbol so nobody gets mixed up.
 - **Online rooms:** create a room, send the link, and everyone plays from their own computer (a laptop or desktop works best for now). Each player picks one of six colours (a colour can't be taken twice), or joins as a spectator. Refreshing the page puts you back in your seat.
-- **Fair hidden hands:** the server runs the game and only ever sends you your own cards. Everyone else's hands are just counts.
+- **Fair hidden hands:** the server runs the game and only ever sends you your own cards. Everyone else's hands are just counts, and private moments (the card you drew, what was stolen) are only told to the people involved.
 
 ## Play online with friends
 
 1. Open the game and type your name, then **Create a room**.
 2. **Copy link** and send it to your friends (or tell them the 4-letter room code). When they open it, it asks their name first.
 3. Everyone picks a colour. Anyone who just wants to watch picks **Just watch**.
-4. The host chooses how opening settlements are placed and presses **Start game** (3–6 players).
+4. The host chooses how opening settlements are placed and presses **Start game** (3–6 players). The host can also remove anyone from the lobby, for example a stranger who guessed the code.
 
 ## Put it online for free (Render)
 
@@ -35,7 +35,7 @@ The game runs as one small Node server, which fits [Render's free plan](https://
 
 Free-plan notes: the server sleeps after 15 minutes with nobody connected, so the first person to open the link may wait up to a minute while it wakes. It stays awake while a game is being played.
 
-**Games survive restarts.** Render can restart a free server at any time, and pushing new code restarts it too. After every move the server gives each player's browser a sealed backup of the game (encrypted with a secret only the server knows, so nobody can read or edit it). If the server restarts, everyone's screen reconnects on its own, the first browser back hands over its backup, and the game continues from the last move. A crash in one message is logged and ignored instead of stopping the server.
+**Games survive restarts.** Render can restart a free server at any time, and pushing new code restarts it too. After every move the server gives each player's browser a sealed backup of the game (encrypted with a secret only the server knows, so nobody can read or edit it). If the server restarts, everyone's screen reconnects on its own and hands back its backup; the server keeps the newest one and pauses play for a few seconds until everyone is back, then the game continues from the last move. A crash in one message is logged and ignored instead of stopping the server.
 
 ## Run it on your computer
 

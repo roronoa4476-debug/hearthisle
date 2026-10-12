@@ -89,7 +89,7 @@ function connect() {
     try { msg = JSON.parse(event.data); } catch { return; }
     if (msg.type === 'error') {
       ui.error = msg.message;
-      if (msg.code === 'no-room') {
+      if (msg.code === 'no-room' || msg.code === 'removed') {
         wantConnection = false;
         roomCode = null;
         history.replaceState(null, '', '/');
@@ -102,7 +102,8 @@ function connect() {
       return;
     }
     if (msg.type !== 'room') return;
-    if (msg.snapshot) store.set(`hearthisle-snap-${msg.room.code}`, msg.snapshot);
+    if (msg.snapshot) saveBackup(msg.room.code, msg.snapshot, msg.room.version);
+    setBusy(false);
     const hadOffer = !!game?.offer;
     const oldToast = game?.toast?.id;
     room = msg.room;
@@ -117,7 +118,7 @@ function connect() {
       ui.get = R.emptyRes();
       ui.counter = null;
     }
-    if (game?.mode !== 'discard') ui.discard = R.emptyRes();
+    if (!game || !R.mustDiscard(game, room.you?.seat ?? -1)) ui.discard = R.emptyRes();
     if (game?.toast && game.toast.id !== oldToast) {
       clearTimeout(timers.toast);
       const id = game.toast.id;
@@ -133,6 +134,10 @@ function connect() {
     timers.retry = setTimeout(connect, Math.min(8000, 600 * 2 ** retry++));
   });
 }
+// Render's free plan sleeps after 15 minutes without messages *from* players,
+// so every open game sends a tiny keep-alive every 4 minutes.
+setInterval(() => send({ type: 'ping' }), 4 * 60 * 1000);
+
 function send(msg) {
   if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
 }
@@ -140,7 +145,34 @@ function showNotice(text) {
   const n = document.getElementById('notice');
   if (n) n.textContent = text;
 }
-const act = (name) => (...args) => send({ type: 'action', name, args });
+// One move at a time: after sending a move, ignore extra clicks until the
+// server answers (stops an accidental double-click trading twice).
+function setBusy(on) {
+  clearTimeout(timers.busy);
+  document.body.classList.toggle('busy', on);
+  if (on) timers.busy = setTimeout(() => setBusy(false), 900);
+}
+function sendAction(name, args) {
+  if (document.body.classList.contains('busy')) return;
+  setBusy(true);
+  send({ type: 'action', name, args });
+}
+const act = (name) => (...args) => sendAction(name, args);
+
+// Keep only this room's backup, and never replace a newer backup with an
+// older one (e.g. while the server is still restoring from someone else's).
+function saveBackup(code, snapshot, version) {
+  try {
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const key = localStorage.key(i);
+      if (key?.startsWith('hearthisle-snap-') && key !== `hearthisle-snap-${code}` && key !== `hearthisle-snapv-${code}`) localStorage.removeItem(key);
+    }
+  } catch {}
+  const stored = Number(store.get(`hearthisle-snapv-${code}`) || -1);
+  if (Number.isInteger(version) && version < stored) return;
+  store.set(`hearthisle-snap-${code}`, snapshot);
+  store.set(`hearthisle-snapv-${code}`, String(version ?? 0));
+}
 
 /* ---------- actions ---------- */
 const actions = {
@@ -195,6 +227,9 @@ const actions = {
     setTimeout(() => { ui.copied = false; draw(); }, 1800);
   },
   pickColor: (color) => send({ type: 'pickColor', color }),
+  remove: (id, who) => {
+    if (confirm(`Remove ${who} from this room?`)) send({ type: 'remove', id });
+  },
   spectate: () => send({ type: 'spectate' }),
   setQuick: (quick) => send({ type: 'setOption', quick }),
   start: () => send({ type: 'start' }),
@@ -213,17 +248,17 @@ const actions = {
   moveRobber: act('moveRobber'),
   stealFrom: act('stealFrom'),
   buyDevCard: act('buyDevCard'),
-  playDevCard: (type) => { ui.panel = null; send({ type: 'action', name: 'playDevCard', args: [type] }); },
+  playDevCard: (type) => { ui.panel = null; sendAction('playDevCard', [type]); },
   pickResource: act('pickResource'),
-  discard: () => send({ type: 'action', name: 'discard', args: [ui.discard] }),
+  discard: () => sendAction('discard', [ui.discard]),
   setTrade: act('setTrade'),
   bankTrade: act('bankTrade'),
-  propose: () => send({ type: 'action', name: 'propose', args: [ui.give, ui.get] }),
-  respond: (_seat, accept) => send({ type: 'action', name: 'respond', args: [accept] }),
+  propose: () => sendAction('propose', [ui.give, ui.get]),
+  respond: (_seat, accept) => sendAction('respond', [accept]),
   confirm: act('confirm'),
   withdraw: act('withdraw'),
   counter: () => {
-    send({ type: 'action', name: 'counter', args: [ui.give, ui.get] });
+    sendAction('counter', [ui.give, ui.get]);
     ui.counter = null;
     draw();
   },
