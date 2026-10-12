@@ -248,7 +248,7 @@ function renderTurn(g, a, me) {
   const P = who(g.cur);
   const mine = me === g.cur && g.mode !== 'discard';
   const blocking = R.isBlocking(g);
-  const sub = g.phase === 'setup' ? 'Opening placements' : g.playerCount > 4 ? `Turn ${g.turn} · ${g.paired ? 'Player 2 · build only' : 'Player 1 · roll + build'}` : `Turn ${g.turn}`;
+  const sub = g.phase === 'setup' ? 'Opening placements' : g.playerCount > 4 ? `Turn ${g.turn} · ${g.paired ? 'Player 2 · actions, no roll' : 'Player 1 · roll + actions'}` : `Turn ${g.turn}`;
   const rollPhase = g.phase === 'roll' || g.phase === 'setup';
   const mainBtn = g.phase === 'roll'
     ? btn('Roll dice', a.roll, { class: 'btn', disabled: !mine || g.rolling || blocking || g.winner !== null })
@@ -567,6 +567,11 @@ function renderModal(g, a, ui, me, room) {
       h('p', { text: '3. Spend cards to build (costs are under each build button), trade with the bank or other players, and buy development cards.' }),
       h('p', { text: '4. On a 7, anyone with more than 7 cards returns half. Then move the robber and take a card from a neighbour.' }),
       h('p', { text: '5. First to 10 victory points on their own turn wins. Longest Road and Largest Army are worth 2 each.' }),
+      ...(g.playerCount > 4 ? [
+        h('p', { text: '5–6 players use paired turns. Player 1 rolls, resolves production or a 7, then builds, trades and may play one development card.' }),
+        h('p', { text: 'Player 2 is the third player clockwise from Player 1. After Player 1 finishes, Player 2 takes an action phase without rolling: build, trade with the bank or harbors, and play one development card. Player 2 cannot trade with other players.' }),
+        h('p', { text: 'Then Player 1 moves one seat clockwise and their paired Player 2 moves with them. Development cards bought as Player 1 may be played on your later turn as Player 2, and vice versa. Either player wins immediately upon reaching 10 points during their turn.' }),
+      ] : []),
     ], a);
   } else if (ui.panel === 'history') {
     el = modal('Move history', [h('ol', { class: 'history' }, ...g.log.map((e) => h('li', { text: e.text })))], a);
