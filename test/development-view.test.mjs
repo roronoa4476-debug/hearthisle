@@ -22,7 +22,7 @@ function hand(types = R.DEV_TYPES) {
   const g = R.createGame({ playerCount: 3, randomize: false });
   Object.assign(g, { phase: 'main', turn: 5 });
   g.players[0].dev = types.map(type => ({ type, turn: 0 }));
-  const root = new Element('section'), ui = { devPage: 0 }, played = [];
+  const root = new Element('section'), ui = {}, played = [];
   const context = { R, getGeometry, Node: Element, document: { createElement: tag => new Element(tag), getElementById: () => root } };
   runInNewContext(source, context);
   const actions = { ui(patch) { Object.assign(ui, patch); draw(); }, playDevCard(type) { played.push(type); }, buyDevCard() {} };
@@ -32,32 +32,43 @@ function hand(types = R.DEV_TYPES) {
   return { g, ui, played, root, draw, watch() { seat = null; draw(); }, nodes: () => descendants(root), button(label) { return descendants(root).find(e => e.tag === 'button' && e.attrs['aria-label'] === label); }, cards: () => descendants(root).filter(e => e.tag === 'article') };
 }
 
-test('development pages expose every held type with its art and visible description', () => {
-  const h = hand(), seen = new Set();
-  for (let page = 0; page < 3; page++) {
-    assert.ok(h.cards().length >= 1 && h.cards().length <= 2);
-    for (const card of h.cards()) {
-      seen.add(card.attrs['aria-label']);
-      const nodes = descendants(card), type = R.DEV_TYPES.find(t => R.DEV_NAME[t] === card.attrs['aria-label']);
-      assert.ok(nodes.some(n => n.className?.includes(`i-${type}`)));
-      assert.ok(nodes.some(n => n.tag === 'p' && n.textContent === R.DEV_TEXT[type]));
-    }
-    h.button('Next development cards').events.click();
+test('all held types show their artwork and descriptions together', () => {
+  const h = hand();
+  assert.deepEqual(h.cards().map(c => c.attrs['aria-label']), R.DEV_TYPES.map(t => R.DEV_NAME[t]));
+  for (const card of h.cards()) {
+    const nodes = descendants(card), type = R.DEV_TYPES.find(t => R.DEV_NAME[t] === card.attrs['aria-label']);
+    assert.ok(nodes.some(n => n.className?.includes(`i-${type}`)));
+    assert.ok(nodes.some(n => n.tag === 'p' && n.textContent === R.DEV_TEXT[type]));
   }
-  assert.deepEqual([...seen], R.DEV_TYPES.map(t => R.DEV_NAME[t]));
-  assert.equal(h.ui.devPage, 0);
+  assert.equal(h.button('Next development cards'), undefined);
 });
 
-test('development paging clamps after spending cards and groups duplicate copies', () => {
-  const h = hand(['knight', 'knight', 'roads', 'plenty', 'monopoly', 'vp']);
-  assert.ok(h.nodes().some(n => n.attrs['aria-label'] === '2 cards'));
-  h.ui.devPage = 2;
+test('only owned types appear with exact counts and disappear when spent', () => {
+  const h = hand(['knight', 'knight', 'monopoly']);
+  assert.deepEqual(h.cards().map(c => c.attrs['aria-label']), ['Knight', 'Monopoly']);
+  assert.ok(descendants(h.cards()[0]).some(n => n.textContent === '×2'));
+  assert.ok(descendants(h.cards()[1]).some(n => n.textContent === '×1'));
   h.g.players[0].dev = [{ type: 'knight', turn: 0 }];
   h.draw();
   assert.equal(h.cards().length, 1);
   assert.equal(h.cards()[0].attrs['aria-label'], 'Knight');
-  assert.equal(h.button('Next development cards'), undefined);
+  assert.ok(h.nodes().some(n => n.attrs['aria-label'] === '1 card'));
   assert.ok(!h.root.children.includes('null'));
+});
+
+test('a purchase adds just the drawn card, with no unowned choices', () => {
+  const h = hand([]);
+  h.g.deck = ['monopoly', 'knight'];
+  h.g.players[0].res = { ...R.COST.dev };
+  const next = R.buyDevCard(h.g);
+  assert.notEqual(next, h.g);
+  Object.assign(h.g, next);
+  h.draw();
+  assert.deepEqual(h.g.players[0].dev, [{ type: 'knight', turn: h.g.turn }]);
+  assert.deepEqual(h.g.deck, ['monopoly']);
+  assert.deepEqual(h.cards().map(c => c.attrs['aria-label']), ['Knight']);
+  assert.equal(h.button('Play Knight'), undefined);
+  assert.equal(h.button('Play Monopoly'), undefined);
 });
 
 test('Play dispatches the displayed type and never plays hidden victory points', () => {
@@ -84,6 +95,18 @@ test('new cards, other turns and one-card-per-turn restrictions still block Play
   h.draw();
   assert.equal(h.button('Play Knight'), undefined);
   assert.ok(h.nodes().some(n => n.textContent === 'One per turn'));
+});
+
+test('an older copy stays playable when another copy was bought this turn', () => {
+  const h = hand(['knight', 'knight']);
+  h.g.players[0].dev[1].turn = h.g.turn;
+  h.draw();
+  assert.ok(h.button('Play Knight'));
+  Object.assign(h.g, R.playDevCard(h.g, 'knight'));
+  h.draw();
+  assert.equal(h.g.players[0].dev.length, 1);
+  assert.equal(h.g.players[0].dev[0].turn, h.g.turn);
+  assert.equal(h.button('Play Knight'), undefined);
 });
 
 test('spectators and empty hands do not expose development cards or a pager', () => {

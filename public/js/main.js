@@ -40,7 +40,6 @@ const ui = {
   codeDraft: '',
   copied: false,
   tradeTab: 'bank',
-  devPage: 0,
   give: R.emptyRes(),
   get: R.emptyRes(),
   discard: R.emptyRes(),
@@ -265,7 +264,7 @@ const actions = {
   setQuick: (quick) => send({ type: 'setOption', quick }),
   start: () => send({ type: 'start' }),
   practiceRefill: () => send({ type: 'practiceRefill' }),
-  practiceReset: () => { ui.panel = null; ui.devPage = 0; send({ type: 'practiceReset' }); },
+  practiceReset: () => { ui.panel = null; send({ type: 'practiceReset' }); },
   backToLobby: (force) => {
     if (force && !confirm('End this game for everyone and go back to the lobby?')) return;
     ui.panel = null;

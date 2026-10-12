@@ -367,16 +367,16 @@ function renderDevs(g, a, ui, me) {
   const pl = g.players[me];
   const mine = me === g.cur;
   const owned = R.DEV_TYPES.filter((type) => pl.dev.some((c) => c.type === type));
-  const pages = Math.ceil(owned.length / 2);
-  const page = Math.min(Math.max(0, Math.floor(ui.devPage || 0)), Math.max(0, pages - 1));
-  const cards = owned.slice(page * 2, page * 2 + 2).map((type) => {
+  const cards = owned.map((type) => {
     const list = pl.dev.filter((c) => c.type === type);
     const playable = mine && R.canPlayDev(g, type);
     const note = type === 'vp' ? 'Hidden point' : !mine ? 'On your turn' : list.every((c) => c.turn >= g.turn) ? 'Next turn' : g.devPlayed ? 'One per turn' : 'Not now';
     return h('article', { class: `dev-card${type === 'vp' ? ' dev-vp' : ''}`, 'aria-label': R.DEV_NAME[type] },
-      h('div', { class: 'dev-art' }, icon(type), list.length > 1 ? h('span', { class: 'dev-count', text: `×${list.length}`, 'aria-label': `${list.length} cards` }) : null),
-      h('h3', { class: 'dev-name', text: R.DEV_NAME[type] }),
-      h('p', { class: 'dev-description', text: R.DEV_TEXT[type] }),
+      h('div', { class: 'dev-art' }, icon(type)),
+      h('div', { class: 'dev-copy' },
+        h('h3', { class: 'dev-name' }, R.DEV_NAME[type], h('span', { class: 'dev-count', text: `×${list.length}`, 'aria-label': `${list.length} ${list.length === 1 ? 'card' : 'cards'}` })),
+        h('p', { class: 'dev-description', text: R.DEV_TEXT[type] }),
+      ),
       h('div', { class: 'dev-action' }, playable ? btn('Play', () => a.playDevCard(type), { class: 'btn small', 'aria-label': `Play ${R.DEV_NAME[type]}` }) : h('small', { text: note })),
     );
   });
@@ -384,12 +384,7 @@ function renderDevs(g, a, ui, me) {
   $('devs').replaceChildren(
     panelTitle('Development cards', h('small', { text: `${g.deck.length} in deck` })),
     h('div', { class: 'buy' }, btn('Buy a card', a.buyDevCard, { class: 'btn small wood', disabled: !canBuy, title: `Costs ${R.costText(R.COST.dev)}` }), costIcons(R.COST.dev)),
-    cards.length ? h('div', { class: 'dev-list' }, cards) : h('p', { class: 'muted', text: 'No cards yet. They give knights, free roads, resources or hidden points.' }),
-    ...(pages > 1 ? [h('nav', { class: 'dev-pages', 'aria-label': 'Your development cards' },
-      btn('‹', () => a.ui({ devPage: (page + pages - 1) % pages }), { class: 'dev-page', 'aria-label': 'Previous development cards' }),
-      h('span', { text: `${page + 1} / ${pages}`, 'aria-live': 'polite' }),
-      btn('›', () => a.ui({ devPage: (page + 1) % pages }), { class: 'dev-page', 'aria-label': 'Next development cards' }),
-    )] : []),
+    cards.length ? h('div', { class: 'dev-list' }, cards) : h('p', { class: 'muted', text: 'No development cards yet. Buy one to draw a random card.' }),
   );
 }
 

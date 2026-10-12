@@ -2,7 +2,7 @@
 
 **[Play Koolkatan](https://koolkatan.onrender.com/)** — create a room and share its link with friends.
 
-Version **0.5.0** adds new resource and development-card artwork, readable development-card descriptions with paging, a slightly larger map with zoom and dragging, and the Koolkatan name.
+Version **0.5.0** adds new resource and development-card artwork, owned development cards with counts and readable descriptions, a slightly larger map with zoom and dragging, and the Koolkatan name.
 
 **A Catan-style island board game I built for the browser**, so my friends and I can play together for free.
 
@@ -19,13 +19,13 @@ Settle an island, roll for resources, trade with each other and the bank, build 
 - **Trading:** bank and harbour ratios (4:1, 3:1, 2:1), plus offers between players with accept, decline and counteroffer.
 - **One screen, no scrolling:** the board, your hand, the bank, players, trading and dev cards all fit at once, down to a 1280×720 laptop.
 - **Map zoom:** use +/− or the mouse wheel to zoom, drag the enlarged map, and press Fit to show the full island. Keyboard controls: +/−, arrow keys, Home or 0.
-- **Original art:** illustrated terrain tiles, minimal resource and development-card emblems, and wooden pieces in six colours (Red, Blue, White, Orange, Green, Purple). Each colour also has its own symbol so nobody gets mixed up. Development cards show their description below the artwork, with two types per page.
+- **Original art:** illustrated terrain tiles, minimal resource and development-card emblems, and wooden pieces in six colours (Red, Blue, White, Orange, Green, Purple). Each colour also has its own symbol so nobody gets mixed up. Only owned development-card types appear in your hand, with artwork, counts and descriptions visible together.
 - **Online rooms:** create a room, send the link, and everyone plays from their own computer (a laptop or desktop works best for now). Each player picks one of six colours (a colour can't be taken twice), or joins as a spectator. Refreshing the page puts you back in your seat.
 - **Fair hidden hands:** the server runs the game and only ever sends you your own cards. Everyone else's hands are just counts, and private moments (the card you drew, what was stolen) are only told to the people involved.
 
 ## Play online with friends
 
-For solo practice, enter **`/test`** as your name and press **Create a room**. This opens a separate practice island with two passive opponents, 12 of every resource and one of each development-card type. The game menu has **Refill practice resources** (during an unblocked action phase) and **New practice island**. Dice, discards, placement and development-card timing still follow the normal rules. Player-to-player trade responses are not automated. Practice commands cannot grant resources in ordinary multiplayer rooms.
+For solo practice, enter **`/test`** as your name and press **Create a room**. This opens a separate practice island with two passive opponents, 12 of every resource and an empty development hand. Each purchase draws one random card from the shuffled deck. The game menu has **Refill practice resources** (during an unblocked action phase) and **New practice island**. Dice, discards, placement and development-card timing still follow the normal rules. Player-to-player trade responses are not automated. Practice commands cannot grant resources in ordinary multiplayer rooms.
 
 1. Open the game and type your name, then **Create a room**.
 2. **Copy link** and send it to your friends (or tell them the 4-letter room code). When they open it, it asks their name first.
