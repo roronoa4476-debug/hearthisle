@@ -1,0 +1,28 @@
+/*
+  Artwork skin. Every texture and illustration file is referenced only here,
+  so artwork can be replaced without touching layout or game logic.
+  (Player pieces are drawn in js/pieces.js because they take player colours.)
+*/
+:root {
+  --art-oak: url('../art/oak.svg');
+  --art-sea: url('../art/sea.svg');
+  --art-paper: url('../art/parchment.svg');
+}
+
+.t-forest { background-image: url('../art/forest.svg'); }
+.t-pasture { background-image: url('../art/pasture.svg'); }
+.t-fields { background-image: url('../art/fields.svg'); }
+.t-hills { background-image: url('../art/hills.svg'); }
+.t-mountains { background-image: url('../art/mountains.svg'); }
+.t-desert { background-image: url('../art/desert.svg'); }
+
+.i-wood { background-image: url('../art/icons/wood.svg'); }
+.i-brick { background-image: url('../art/icons/brick.svg'); }
+.i-wheat { background-image: url('../art/icons/wheat.svg'); }
+.i-sheep { background-image: url('../art/icons/sheep.svg'); }
+.i-ore { background-image: url('../art/icons/ore.svg'); }
+.i-knight { background-image: url('../art/icons/knight.svg'); }
+.i-roads { background-image: url('../art/icons/roads.svg'); }
+.i-plenty { background-image: url('../art/icons/plenty.svg'); }
+.i-monopoly { background-image: url('../art/icons/monopoly.svg'); }
+.i-vp { background-image: url('../art/icons/vp.svg'); }

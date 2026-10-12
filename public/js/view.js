@@ -1,0 +1,496 @@
+// Renders the game from ONE seat's point of view (online-style): your hand,
+// your buttons, everyone else's public info. Reads state, never changes it;
+// clicks call actions from main.js.
+
+import { getGeometry, pctX, pctY, pctW } from './geometry.js';
+import * as R from './rules.js';
+import { settlementArt, cityArt, roadArt, robberArt, playerMark } from './pieces.js';
+
+const FACES = { 1: [4], 2: [2, 6], 3: [2, 4, 6], 4: [0, 2, 6, 8], 5: [0, 2, 4, 6, 8], 6: [0, 2, 3, 5, 6, 8] };
+const $ = (id) => document.getElementById(id);
+
+/** Element builder using DOM APIs only (no innerHTML), so it works under a strict CSP. */
+function h(tag, props = {}, ...children) {
+  const el = document.createElement(tag);
+  for (const [key, value] of Object.entries(props)) {
+    if (value === null || value === undefined || value === false) continue;
+    if (key === 'class') el.className = value;
+    else if (key === 'text') el.textContent = value;
+    else if (key === 'style') for (const [k, v] of Object.entries(value)) el.style.setProperty(k, v);
+    else if (key.startsWith('on')) el.addEventListener(key.slice(2).toLowerCase(), value);
+    else el.setAttribute(key, value === true ? '' : String(value));
+  }
+  for (const child of children.flat()) {
+    if (child === null || child === undefined || child === false) continue;
+    el.append(child instanceof Node ? child : String(child));
+  }
+  return el;
+}
+const btn = (text, onClick, props = {}) => h('button', { type: 'button', text, onClick, ...props });
+const icon = (name, extra = '') => h('span', { class: `icon i-${name}${extra ? ` ${extra}` : ''}`, 'aria-hidden': 'true' });
+const mark = (p) => playerMark(R.PLAYERS[p]);
+const name = (p) => R.PLAYERS[p].name;
+const costIcons = (cost) => h('span', { class: 'cost' }, Object.entries(cost).flatMap(([r, n]) => Array.from({ length: n }, () => icon(r))));
+const panelTitle = (title, extra) => h('h2', { class: 'panel-title' }, h('span', { text: title }), extra || null);
+
+let GEO = getGeometry(4);
+const at = (x, y, extra = {}) => ({ left: `${pctX(x, GEO)}%`, top: `${pctY(y, GEO)}%`, ...extra });
+
+/* ---------- board ---------- */
+const board = { key: null, tiles: [], tokens: [], roads: new Map(), towns: new Map() };
+
+function buildBoard(g, root) {
+  root.replaceChildren();
+  board.roads.clear();
+  board.towns.clear();
+  const hexes = GEO.hexes;
+  hexes.forEach((hx) => root.append(h('div', { class: 'surf', style: at(hx.x, hx.y) })));
+  hexes.forEach((hx) => root.append(h('div', { class: 'shore', style: at(hx.x, hx.y) })));
+  for (const hb of GEO.harbors) {
+    for (const vid of hb.verts) {
+      const v = GEO.verts[vid];
+      const dx = v.x - hb.x;
+      const dy = v.y - hb.y;
+      const len = Math.hypot(dx, dy);
+      const sx = hb.x + (dx / len) * 0.25;
+      const sy = hb.y + (dy / len) * 0.25;
+      const ex = v.x - (dx / len) * 0.12;
+      const ey = v.y - (dy / len) * 0.12;
+      root.append(h('div', { class: 'plank', style: at((sx + ex) / 2, (sy + ey) / 2, { width: `${pctW(Math.hypot(ex - sx, ey - sy), GEO)}%`, transform: `translate(-50%, -50%) rotate(${((Math.atan2(ey - sy, ex - sx) * 180) / Math.PI).toFixed(1)}deg)` }) }));
+    }
+  }
+  for (const hb of GEO.harbors) {
+    const any = hb.type === 'any';
+    root.append(
+      h('div', { class: 'harbor', style: at(hb.x, hb.y), role: 'img', 'aria-label': any ? '3 for 1 harbor, any resource' : `2 for 1 harbor, ${R.RES_NAME[hb.type]}` },
+        any ? h('b', { text: '3:1' }) : icon(hb.type),
+        any ? h('small', { text: 'any' }) : h('b', { text: '2:1' }),
+      ),
+    );
+  }
+  board.tiles = hexes.map((hx) => {
+    const terrain = g.terrain[hx.id];
+    const res = R.TERRAIN_RES[terrain];
+    const n = g.numbers[hx.id];
+    const tile = h('div', { class: 'tile', style: at(hx.x, hx.y), role: 'img', 'aria-label': `${R.TERRAIN_NAME[terrain]}${n ? `, number ${n}` : ''}` },
+      h('div', { class: `tile-art t-${terrain}` }),
+      res ? h('span', { class: `tile-badge i-${res}` }) : null,
+    );
+    root.append(tile);
+    return tile;
+  });
+  board.tokens = hexes.map((hx) => {
+    const n = g.numbers[hx.id];
+    if (!n) return null;
+    const token = h('div', { class: `token${n === 6 || n === 8 ? ' hot' : ''}`, style: at(hx.x, hx.y - 0.12), 'aria-hidden': 'true' },
+      h('b', { text: n }),
+      h('span', { class: 'pips' }, Array.from({ length: R.pips(n) }, () => h('i'))),
+    );
+    root.append(token);
+    return token;
+  });
+  board.roadLayer = h('div', { class: 'layer' });
+  board.townLayer = h('div', { class: 'layer' });
+  board.robber = h('div', { class: 'robber', 'aria-hidden': 'true' }, robberArt());
+  board.overlay = h('div', { class: 'layer' });
+  root.append(board.roadLayer, board.townLayer, board.robber, board.overlay);
+}
+
+function renderBoard(g, a, me) {
+  GEO = getGeometry(g.playerCount);
+  const root = $('board');
+  root.style.setProperty('--hex-w', `${(1.7320508 / GEO.width) * 100}%`);
+  root.style.setProperty('--hex-h', `${(2 / GEO.height) * 100}%`);
+  root.style.setProperty('--u', `${100 / GEO.width}cqw`);
+  const key = `${g.playerCount}|${g.terrain.join()}|${g.numbers.join()}`;
+  if (board.key !== key || g.roadList.length < board.roads.size || g.townList.length < board.towns.size) {
+    buildBoard(g, root);
+    board.key = key;
+  }
+  root.classList.toggle('picking', g.mode === 'robber' && me === g.cur);
+  GEO.hexes.forEach((hx) => {
+    board.tiles[hx.id].classList.toggle('prod', g.producing.includes(hx.id));
+    board.tokens[hx.id]?.classList.toggle('blocked', g.robber === hx.id);
+  });
+
+  for (const eid of g.roadList) {
+    if (board.roads.has(eid)) continue;
+    const e = GEO.edges[eid];
+    const p = g.roads[eid];
+    const el = h('div', { class: 'road', role: 'img', 'aria-label': `${name(p)} road`, style: at(e.x, e.y, { transform: `translate(-50%, -50%) rotate(${e.angle.toFixed(1)}deg)` }) }, roadArt(R.PLAYERS[p]));
+    board.roads.set(eid, el);
+    board.roadLayer.append(el);
+  }
+  for (const vid of g.townList) {
+    const t = g.settlements[vid];
+    const kind = t.city ? 'city' : 'settlement';
+    let el = board.towns.get(vid);
+    if (el && el.dataset.kind !== kind) {
+      el.remove();
+      el = null;
+    }
+    if (!el) {
+      const v = GEO.verts[vid];
+      el = h('div', { class: `piece ${kind}`, 'data-kind': kind, role: 'img', 'aria-label': `${name(t.p)} ${kind}`, style: at(v.x, v.y) }, t.city ? cityArt(R.PLAYERS[t.p]) : settlementArt(R.PLAYERS[t.p]));
+      board.towns.set(vid, el);
+      board.townLayer.append(el);
+    }
+  }
+  const rh = GEO.hexes[g.robber];
+  const pos = g.numbers[g.robber] ? at(rh.x + 0.5, rh.y + 0.42) : at(rh.x, rh.y + 0.35);
+  board.robber.style.left = pos.left;
+  board.robber.style.top = pos.top;
+
+  // Only the seat whose turn it is gets clickable spots.
+  const hits = [];
+  if (me === g.cur) {
+    const pc = R.PLAYERS[g.cur].color === '#f7f3ea' ? '#8a6a3a' : R.PLAYERS[g.cur].color;
+    for (const eid of R.validEdges(g)) {
+      const e = GEO.edges[eid];
+      hits.push(h('button', { class: 'ehit', type: 'button', 'aria-label': 'Build a road here', style: at(e.x, e.y, { '--pc': pc, transform: `translate(-50%, -50%) rotate(${e.angle.toFixed(1)}deg)` }), onClick: () => a.placeAtEdge(eid) }));
+    }
+    for (const vid of R.validVertices(g)) {
+      const v = GEO.verts[vid];
+      hits.push(h('button', { class: 'vhit', type: 'button', 'aria-label': g.mode === 'city' ? 'Upgrade this settlement to a city' : 'Build a settlement here', style: at(v.x, v.y, { '--pc': pc }), onClick: () => a.placeAtVertex(vid) }));
+    }
+    for (const hid of R.robberTargets(g)) {
+      const hx = GEO.hexes[hid];
+      const n = g.numbers[hid];
+      hits.push(h('button', { class: 'target', type: 'button', 'aria-label': `Move the robber to ${R.TERRAIN_NAME[g.terrain[hid]]}${n ? ` ${n}` : ''}`, style: at(hx.x, hx.y), onClick: () => a.moveRobber(hid) }));
+    }
+  }
+  board.overlay.replaceChildren(...hits);
+  $('notice').textContent = noticeFor(g, me);
+}
+
+// Notices are written for the acting player; other seats get a neutral version.
+function noticeFor(g, me) {
+  const text = g.toast?.text || '';
+  if (!text || me === g.cur) return text;
+  if (/^You (drew|took)/.test(text)) return '';
+  return text.replace(/ — (you|nothing for you).*$/, '.').replace(/^Choose .*$/, '');
+}
+
+/* ---------- left column ---------- */
+function renderPlayers(g, a, ui, me) {
+  const rows = g.players.map((pl, p) => {
+    const P = R.PLAYERS[p];
+    const visible = R.victoryPoints(g, p, false);
+    const hidden = p === me ? R.victoryPoints(g, p, true) - visible : 0;
+    const gained = g.gains?.[p] ? R.totalCards(g.gains[p]) : 0;
+    const awards = [g.longest === p && h('span', { class: 'award', text: `Longest Road · ${g.roadLens[p]}` }), g.army === p && h('span', { class: 'award', text: `Largest Army · ${pl.knights}` })].filter(Boolean);
+    return h('button', {
+      type: 'button',
+      class: `player${g.cur === p ? ' current' : ''}`,
+      style: { '--pc': P.light ? P.edge : P.color },
+      title: `View the game from ${P.name}’s seat`,
+      'aria-label': `${P.name}: ${visible} points, ${R.totalCards(pl.res)} resource cards, ${pl.dev.length} development cards${g.cur === p ? ', playing now' : ''}${p === me ? ', your seat' : ''}. Click to view this seat.`,
+      'aria-pressed': String(p === me),
+      onClick: () => a.viewAs(p),
+    },
+      playerMark(P),
+      h('span', { class: 'player-name' }, h('span', { text: P.name }), p === me ? h('span', { class: 'tag you', text: 'You' }) : null, gained ? h('span', { class: 'gain-pop', text: `+${gained}` }) : null),
+      h('span', { class: 'vp', title: hidden ? `${visible} visible + ${hidden} hidden` : 'Victory points' }, h('b', { text: visible + hidden }), h('small', { text: 'VP' })),
+      h('span', { class: 'player-stats' },
+        h('span', { class: 'stat', title: 'Resource cards' }, h('i', { class: 'card-glyph' }), String(R.totalCards(pl.res))),
+        h('span', { class: 'stat', title: 'Development cards' }, h('i', { class: 'card-glyph dev' }), String(pl.dev.length)),
+        h('span', { class: 'stat', title: 'Knights played' }, icon('knight'), String(pl.knights)),
+        h('span', { class: 'stat', title: 'Longest road' }, icon('roads'), String(g.roadLens[p])),
+      ),
+      awards.length ? h('span', { class: 'awards' }, awards) : null,
+    );
+  });
+  $('players').replaceChildren(
+    panelTitle('Players', btn(ui.follow ? 'Seat follows turn' : 'Follow turn', a.toggleFollow, { class: 'linkish', title: 'Local testing: the view switches to whoever must act. Click a player to sit in their seat.' })),
+    ...rows,
+  );
+}
+
+function renderBank(g) {
+  const low = (n) => n <= 3;
+  $('bank').replaceChildren(
+    panelTitle('Bank', h('small', { text: 'cards left' })),
+    h('div', { class: 'bank-row' },
+      ...R.RES.map((r) => h('div', { class: `stack${low(g.bank[r]) ? ' low' : ''}`, title: `${g.bank[r]} ${R.RES_NAME[r]} in the bank` }, h('span', { class: `mini-card r-${r}` }, icon(r)), h('b', { text: g.bank[r] }))),
+      h('div', { class: 'stack', title: `${g.deck.length} development cards left` }, h('span', { class: 'mini-card dev' }, icon('vp')), h('b', { text: g.deck.length })),
+    ),
+  );
+}
+
+function renderLog(g) {
+  $('log').replaceChildren(
+    panelTitle('Recent moves'),
+    h('ol', {}, ...g.log.slice(0, 14).map((e) => h('li', {}, h('i', { style: { 'background-color': e.color } }), h('span', { text: e.text })))),
+  );
+}
+
+/* ---------- right column ---------- */
+function waitingText(g, me) {
+  if (g.winner !== null) return R.prompt(g);
+  if (g.mode === 'discard') {
+    const d = g.discards[0];
+    return d.p === me ? `Choose ${d.n} cards to return to the bank.` : `Waiting for ${name(d.p)} to discard.`;
+  }
+  if (g.offer && me !== g.cur) return `${name(g.cur)} is offering a trade — answer it in the trade panel.`;
+  return `Waiting for ${name(g.cur)}…`;
+}
+
+function renderTurn(g, a, me) {
+  const P = R.PLAYERS[g.cur];
+  const mine = me === g.cur && g.mode !== 'discard';
+  const blocking = R.isBlocking(g);
+  const sub = g.phase === 'setup' ? 'Opening placements' : g.playerCount > 4 ? `Turn ${g.turn} · ${g.paired ? 'Player 2 · build only' : 'Player 1 · roll + build'}` : `Turn ${g.turn}`;
+  const rollPhase = g.phase === 'roll' || g.phase === 'setup';
+  const mainBtn = g.phase === 'roll'
+    ? btn('Roll dice', a.roll, { class: 'btn', disabled: !mine || g.rolling || blocking || g.winner !== null })
+    : btn(g.paired ? 'Finish turn' : 'End turn', a.endTurn, { class: 'btn red', disabled: !mine || g.phase !== 'main' || g.rolling || blocking || g.winner !== null });
+  const extra = [];
+  if (mine && g.mode === 'steal') extra.push(h('div', { class: 'choice-row' }, ...g.victims.map((q) => btn(`Take from ${name(q)}`, () => a.stealFrom(q), { class: 'btn small wood' }))));
+  if (mine && !blocking && g.phase === 'main' && ['road', 'settlement', 'city'].includes(g.mode)) extra.push(btn('Cancel building (Esc)', a.cancelBuild, { class: 'linkish' }));
+  $('turn').replaceChildren(
+    h('div', { class: 'turn-head' }, playerMark(P), h('div', {}, h('div', { class: 'turn-name', text: g.cur === me ? 'Your turn' : `${P.name}’s turn` }), h('div', { class: 'turn-sub', text: sub }))),
+    h('p', { class: `prompt well${mine ? ' mine' : ''}`, text: mine ? R.prompt(g) : waitingText(g, me) }),
+    h('div', { class: 'turn-row' },
+      h('div', { class: `dice${g.rolling ? ' rolling' : ''}`, role: 'img', 'aria-label': `Dice show ${g.dice[0]} and ${g.dice[1]}` }, ...g.dice.map((n, i) => h('span', { class: `die${i ? ' red' : ''}` }, ...Array.from({ length: 9 }, (_, k) => h('i', { class: FACES[n].includes(k) ? 'on' : '' }))))),
+      rollPhase && g.phase === 'setup' ? h('span', { class: 'muted', text: 'Place on the board' }) : mainBtn,
+    ),
+    ...extra,
+  );
+}
+
+const describe = (b) => R.RES.filter((r) => b[r]).flatMap((r) => [h('b', { text: b[r] }), icon(r)]);
+
+function basketChips(basket, onStep, limit) {
+  return h('div', { class: 'chips' },
+    ...R.RES.map((r) => h('div', { class: 'chip counter' },
+      icon(r),
+      h('span', { class: `n${basket[r] ? '' : ' zero'}`, text: basket[r] }),
+      h('span', { class: 'step' },
+        h('button', { type: 'button', text: '−', 'aria-label': `Fewer ${R.RES_NAME[r]}`, disabled: !basket[r], onClick: () => onStep(r, -1) }),
+        h('button', { type: 'button', text: '+', 'aria-label': `More ${R.RES_NAME[r]}`, disabled: basket[r] >= (limit ? limit[r] : 19), onClick: () => onStep(r, 1) }),
+      ),
+    )),
+  );
+}
+
+function renderTrade(g, a, ui, me) {
+  const mine = me === g.cur;
+  const playersTab = ui.tradeTab === 'players' && !g.paired;
+  const open = R.tradeOpen(g);
+  const content = [
+    panelTitle('Trade', h('small', { text: mine ? (open ? 'your turn' : 'after rolling') : `${name(g.cur)}’s turn` })),
+    h('div', { class: 'tabs', role: 'tablist' },
+      btn('Bank & harbors', () => a.ui({ tradeTab: 'bank' }), { class: `tab${playersTab ? '' : ' active'}`, role: 'tab', 'aria-selected': String(!playersTab) }),
+      btn(g.offer && !mine ? 'Players •' : 'Players', () => a.ui({ tradeTab: 'players' }), { class: `tab${playersTab ? ' active' : ''}`, role: 'tab', 'aria-selected': String(playersTab), disabled: g.paired }),
+    ),
+  ];
+  if (!playersTab) {
+    const t = g.trade;
+    const ratio = R.harborRatio(g, me, t.give);
+    content.push(
+      h('div', { class: 'row-label' }, h('span', { text: 'You give' }), h('span', { text: 'rate' })),
+      h('div', { class: 'chips' }, ...R.RES.map((r) => h('button', { type: 'button', class: `chip${t.give === r ? ' active' : ''}`, 'aria-pressed': String(t.give === r), 'aria-label': `Give ${R.RES_NAME[r]} at ${R.harborRatio(g, me, r)} for 1`, disabled: !mine, onClick: () => a.setTrade({ give: r }) }, icon(r), h('span', { text: `${R.harborRatio(g, me, r)}:1` })))),
+      h('div', { class: 'row-label' }, h('span', { text: 'You get' }), h('span', { text: 'in bank' })),
+      h('div', { class: 'chips' }, ...R.RES.map((r) => h('button', { type: 'button', class: `chip${t.get === r ? ' active' : ''}`, 'aria-pressed': String(t.get === r), 'aria-label': `Get ${R.RES_NAME[r]}, ${g.bank[r]} in the bank`, disabled: !mine, onClick: () => a.setTrade({ get: r }) }, icon(r), h('span', { text: g.bank[r] })))),
+      h('div', { class: 'summary' },
+        h('p', { text: t.give === t.get ? 'Pick two different resources.' : `${ratio} ${R.RES_NAME[t.give]} → 1 ${R.RES_NAME[t.get]}` }),
+        btn('Trade', a.bankTrade, { class: 'btn small', disabled: !mine || !R.bankTradeOk(g) }),
+      ),
+    );
+  } else if (g.offer) {
+    const o = g.offer;
+    if (mine) {
+      content.push(h('div', { class: 'offer well' },
+        h('div', { class: 'offer-line' }, h('span', { text: 'You give' }), ...describe(o.give), h('span', { class: 'arrow', text: '→' }), h('span', { text: 'get' }), ...describe(o.get)),
+        h('div', { class: 'responses' }, ...g.players.flatMap((_, p) => {
+          if (p === g.cur) return [];
+          const r = o.responses[p];
+          const counter = r && typeof r === 'object';
+          const state = counter ? h('span', { class: 'state ok' }, 'Counter: ', ...describe(r.give), ' → ', ...describe(r.get)) : h('span', { class: `state${r === 'accepted' ? ' ok' : r === 'declined' ? ' no' : ''}`, text: r === 'accepted' ? 'Accepted' : r === 'declined' ? 'Declined' : 'Thinking…' });
+          return [h('div', { class: 'response' }, mark(p), h('span', { class: 'who', text: name(p) }), state, r === 'accepted' || counter ? btn('Trade', () => a.confirm(p), { class: 'btn small' }) : null)];
+        })),
+        btn('Withdraw offer', a.withdraw, { class: 'linkish' }),
+      ));
+    } else if (ui.counter === me) {
+      content.push(
+        h('div', { class: 'row-label' }, h('span', { text: `You give ${name(g.cur)}` })),
+        basketChips(ui.get, (r, d) => a.ui({ get: { ...ui.get, [r]: Math.max(0, ui.get[r] + d) } }), g.players[me].res),
+        h('div', { class: 'row-label' }, h('span', { text: 'You get' })),
+        basketChips(ui.give, (r, d) => a.ui({ give: { ...ui.give, [r]: Math.max(0, ui.give[r] + d) } }), g.players[g.cur].res),
+        h('div', { class: 'summary' }, btn('Cancel', () => a.ui({ counter: null }), { class: 'linkish' }), btn('Send counter', () => a.counter(me), { class: 'btn small', disabled: !R.validExchange(ui.give, ui.get) || !R.afford(g.players[me].res, ui.get) })),
+      );
+    } else {
+      const r = o.responses[me];
+      content.push(h('div', { class: 'offer well' },
+        h('div', { class: 'offer-line' }, mark(g.cur), h('b', { text: `${name(g.cur)} offers` })),
+        h('div', { class: 'offer-line' }, h('span', { text: 'You get' }), ...describe(o.give)),
+        h('div', { class: 'offer-line' }, h('span', { text: 'You give' }), ...describe(o.get)),
+        r ? h('p', { class: 'muted', text: r === 'accepted' ? 'You accepted. Waiting for them to confirm.' : r === 'declined' ? 'You declined.' : 'You sent a counteroffer.' }) : null,
+        h('div', { class: 'choice-row' },
+          btn('Accept', () => a.respond(me, true), { class: 'btn small', disabled: !R.afford(g.players[me].res, o.get) }),
+          btn('Decline', () => a.respond(me, false), { class: 'btn small red' }),
+          btn('Counter', () => a.ui({ counter: me, give: { ...o.give }, get: { ...o.get } }), { class: 'btn small wood' }),
+        ),
+      ));
+    }
+  } else if (mine && open) {
+    content.push(
+      h('div', { class: 'row-label' }, h('span', { text: 'You give' })),
+      basketChips(ui.give, (r, d) => a.ui({ give: { ...ui.give, [r]: Math.max(0, ui.give[r] + d) } }), g.players[me].res),
+      h('div', { class: 'row-label' }, h('span', { text: 'You want' })),
+      basketChips(ui.get, (r, d) => a.ui({ get: { ...ui.get, [r]: Math.max(0, ui.get[r] + d) } })),
+      h('div', { class: 'summary' }, h('p', { class: 'muted', text: 'Everyone sees your offer.' }), btn('Offer', a.propose, { class: 'btn small', disabled: !R.validExchange(ui.give, ui.get) || !R.afford(g.players[me].res, ui.give) })),
+    );
+  } else {
+    content.push(h('p', { class: 'muted well', style: { padding: '10px' }, text: mine ? 'Roll the dice first, then you can offer trades.' : `When ${name(g.cur)} offers a trade, it appears here for you to accept, decline or counter.` }));
+  }
+  $('trade').replaceChildren(...content);
+}
+
+function renderDevs(g, a, me) {
+  const pl = g.players[me];
+  const mine = me === g.cur;
+  const cards = R.DEV_TYPES.flatMap((type) => {
+    const list = pl.dev.filter((c) => c.type === type);
+    if (!list.length) return [];
+    const playable = mine && R.canPlayDev(g, type);
+    const note = type === 'vp' ? 'Hidden point' : !mine ? 'On your turn' : list.every((c) => c.turn >= g.turn) ? 'Next turn' : g.devPlayed ? 'One per turn' : 'Not now';
+    return [h('div', { class: `dev${type === 'vp' ? ' vp' : ''}`, title: R.DEV_TEXT[type] },
+      icon(type),
+      h('b', { text: `${R.DEV_NAME[type]}${list.length > 1 ? ` ×${list.length}` : ''}` }),
+      playable ? btn('Play', () => a.playDevCard(type), { class: 'btn small' }) : h('small', { text: note }),
+    )];
+  });
+  const canBuy = mine && R.tradeOpen(g) && g.deck.length > 0 && R.afford(pl.res, R.COST.dev);
+  $('devs').replaceChildren(
+    panelTitle('Development cards', h('small', { text: `${g.deck.length} in deck` })),
+    h('div', { class: 'buy' }, btn('Buy a card', a.buyDevCard, { class: 'btn small wood', disabled: !canBuy, title: `Costs ${R.costText(R.COST.dev)}` }), costIcons(R.COST.dev)),
+    cards.length ? h('div', { class: 'dev-list' }, cards) : h('p', { class: 'muted', text: 'No cards yet. They give knights, free roads, resources or hidden points.' }),
+  );
+}
+
+/* ---------- dock ---------- */
+function renderDock(g, a, me) {
+  const P = R.PLAYERS[me];
+  const pl = g.players[me];
+  const mine = me === g.cur;
+  const picking = mine && (g.mode === 'plenty' || g.mode === 'monopoly');
+  const gains = g.gains?.[me];
+  $('hand').replaceChildren(
+    h('div', { class: 'hand-head' }, playerMark(P), h('span', { text: picking ? (g.mode === 'plenty' ? `Pick ${g.plentyLeft} from the bank` : 'Pick a resource to claim') : 'Your hand' }), h('small', { text: `${R.totalCards(pl.res)} cards` })),
+    h('div', { class: 'cards' },
+      ...R.RES.map((r) => {
+        const n = pl.res[r];
+        const pickable = picking && !(g.mode === 'plenty' && g.bank[r] <= 0);
+        return h('button', {
+          type: 'button',
+          class: `rcard r-${r}${n || picking ? '' : ' zero'}${gains?.[r] ? ' gained' : ''}${pickable ? ' pick' : ''}`,
+          disabled: !pickable,
+          'aria-label': pickable ? `Choose ${R.RES_NAME[r]}` : `${n} ${R.RES_NAME[r]}`,
+          onClick: () => a.pickResource(r),
+        },
+          h('span', { class: 'rcard-top' }, icon(r)),
+          h('span', { class: 'rcard-name', text: R.RES_NAME[r] }),
+          h('span', { class: 'rcard-n', text: gains?.[r] ? `+${gains[r]}` : n }),
+        );
+      }),
+    ),
+  );
+  const left = R.piecesLeft(g, me);
+  const art = { road: roadArt, settlement: settlementArt, city: cityArt };
+  $('builds').replaceChildren(
+    ...['road', 'settlement', 'city'].map((kind) =>
+      h('button', {
+        type: 'button',
+        class: `build${g.mode === kind && mine ? ' selected' : ''}`,
+        disabled: !mine || (!R.canBuild(g, kind) && g.mode !== kind),
+        'aria-pressed': String(g.mode === kind && mine),
+        'aria-label': `Build a ${kind}: costs ${R.costText(R.COST[kind])}, ${left[kind]} left`,
+        onClick: () => a.chooseBuild(kind),
+      },
+        h('span', { class: `build-art ${kind}` }, art[kind](P)),
+        h('b', { text: R.BUILD_NAME[kind] }),
+        costIcons(R.COST[kind]),
+        h('small', { text: `${left[kind]} left` }),
+      ),
+    ),
+  );
+}
+
+/* ---------- dialogs ---------- */
+function modal(title, content, a, closable = true) {
+  return h('div', { class: 'shade' },
+    h('section', { class: 'modal oak', role: 'dialog', 'aria-modal': 'true', 'aria-label': title },
+      h('div', { class: 'modal-head' }, h('h2', { text: title }), closable ? h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Close', text: '×', onClick: () => a.ui({ panel: null }) }) : null),
+      ...content,
+    ),
+  );
+}
+
+function renderModal(g, a, ui, me) {
+  let el = null;
+  if (ui.panel === 'new') {
+    el = modal('New island', [
+      h('h3', { text: 'Players' }),
+      h('div', { class: 'option-grid' }, ...[3, 4, 5, 6].map((n) => btn(String(n), () => a.ui({ count: n }), { class: `option${ui.count === n ? ' active' : ''}`, 'aria-pressed': String(ui.count === n), 'aria-label': `${n} players` }))),
+      h('div', { class: 'seat-row' }, ...R.PLAYERS.slice(0, ui.count).map((P) => playerMark(P))),
+      h('p', { class: 'muted', text: ui.count > 4 ? 'Large island · 30 tiles · paired turns for 5–6 players.' : 'Classic island · 19 tiles.' }),
+      h('h3', { text: 'Opening settlements' }),
+      h('div', { class: 'option-grid two' },
+        btn('Place them yourselves', () => a.ui({ quick: false }), { class: `option${ui.quick ? '' : ' active'}` }),
+        btn('Quick start', () => a.ui({ quick: true }), { class: `option${ui.quick ? ' active' : ''}` }),
+      ),
+      btn('Start game', a.newGame, { class: 'btn wide' }),
+    ], a, g.townList.length > 0);
+  } else if (g.winner !== null) {
+    el = modal(`${name(g.winner)} wins!`, [
+      h('div', { class: 'winner-art' }, mark(g.winner)),
+      h('p', { text: `${R.victoryPoints(g, g.winner, true)} victory points, including ${g.players[g.winner].dev.filter((c) => c.type === 'vp').length} hidden point cards.` }),
+      btn('Play another island', () => a.ui({ panel: 'new' }), { class: 'btn wide' }),
+    ], a, false);
+  } else if (g.mode === 'discard' && g.discards[0].p === me) {
+    const need = g.discards[0].n;
+    el = modal('Return cards to the bank', [
+      h('p', { text: `A 7 was rolled and you hold more than 7 cards. Choose exactly ${need} to return.` }),
+      basketChips(ui.discard, (r, d) => a.ui({ discard: { ...ui.discard, [r]: Math.max(0, ui.discard[r] + d) } }), g.players[me].res),
+      h('p', { class: 'muted', text: `Selected ${R.totalCards(ui.discard)} of ${need}` }),
+      btn('Return these cards', a.discard, { class: 'btn wide', disabled: R.totalCards(ui.discard) !== need }),
+    ], a, false);
+  } else if (ui.panel === 'menu') {
+    el = modal('Menu', [
+      btn('New game', () => a.ui({ panel: 'new' }), { class: 'btn wide' }),
+      btn('How to play', () => a.ui({ panel: 'help' }), { class: 'btn wood wide' }),
+      btn('Full move history', () => a.ui({ panel: 'history' }), { class: 'btn wood wide' }),
+      h('p', { class: 'muted', text: `${g.playerCount} players · saved in this browser. Online rooms come next; for now, click a player on the left to see the game from their seat.` }),
+    ], a);
+  } else if (ui.panel === 'help') {
+    el = modal('How to play', [
+      h('p', { text: '1. Each player places two settlements and two roads. Your second settlement gives you starting resources.' }),
+      h('p', { text: '2. On your turn, roll the dice. Every tile with that number pays its neighbours: 1 card per settlement, 2 per city. The robber blocks its tile.' }),
+      h('p', { text: '3. Spend cards to build (costs are under each build button), trade with the bank or other players, and buy development cards.' }),
+      h('p', { text: '4. On a 7, anyone with more than 7 cards returns half. Then move the robber and take a card from a neighbour.' }),
+      h('p', { text: '5. First to 10 victory points on their own turn wins. Longest Road and Largest Army are worth 2 each.' }),
+    ], a);
+  } else if (ui.panel === 'history') {
+    el = modal('Move history', [h('ol', { class: 'history' }, ...g.log.map((e) => h('li', { text: e.text })))], a);
+  }
+  $('modal-root').replaceChildren(...(el ? [el] : []));
+  for (const id of ['left', 'right', 'table', 'dock']) $(id).inert = !!el;
+}
+
+export function render(g, a, ui) {
+  const me = ui.seat;
+  const focused = document.activeElement?.getAttribute('aria-label');
+  renderBoard(g, a, me);
+  renderPlayers(g, a, ui, me);
+  renderBank(g);
+  renderLog(g);
+  renderTurn(g, a, me);
+  renderTrade(g, a, ui, me);
+  renderDevs(g, a, me);
+  renderDock(g, a, me);
+  renderModal(g, a, ui, me);
+  if (focused) [...document.querySelectorAll('button[aria-label]')].find((e) => e.getAttribute('aria-label') === focused && !e.disabled)?.focus({ preventScroll: true });
+  const dialog = document.querySelector('[role=dialog]');
+  if (dialog && !dialog.contains(document.activeElement)) dialog.querySelector('button:not(:disabled)')?.focus({ preventScroll: true });
+}
