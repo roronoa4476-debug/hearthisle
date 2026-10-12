@@ -197,7 +197,7 @@ function renderPlayers(g, a, ui, me, room) {
       h('span', { class: 'vp', title: hidden ? `${visible} visible + ${hidden} hidden` : 'Victory points' }, h('b', { text: visible + hidden }), h('small', { text: 'VP' })),
       h('span', { class: 'player-stats' },
         h('span', { class: 'stat', title: 'Resource cards' }, h('i', { class: 'card-glyph' }), String(count(pl))),
-        h('span', { class: 'stat', title: 'Development cards' }, h('i', { class: 'card-glyph dev' }), String(pl.dev.length)),
+        h('span', { class: 'stat', title: 'Unplayed development cards (types hidden)' }, icon('dev-back'), String(pl.dev.length)),
         h('span', { class: 'stat', title: 'Knights played' }, icon('knight'), String(pl.knights)),
         h('span', { class: 'stat', title: 'Longest road' }, icon('roads'), String(g.roadLens[p])),
       ),
@@ -220,7 +220,7 @@ function renderBank(g) {
     panelTitle('Bank', h('small', { text: 'cards left' })),
     h('div', { class: 'bank-row' },
       ...R.RES.map((r) => h('div', { class: `stack${low(g.bank[r]) ? ' low' : ''}`, title: `${g.bank[r]} ${R.RES_NAME[r]} in the bank` }, h('span', { class: `mini-card r-${r}` }, icon(r)), h('b', { text: g.bank[r] }))),
-      h('div', { class: 'stack', title: `${g.deck.length} development cards left` }, h('span', { class: 'mini-card dev' }, icon('vp')), h('b', { text: g.deck.length })),
+      h('div', { class: 'stack', title: `${g.deck.length} development cards left in the face-down deck`, 'aria-label': `Development deck: ${g.deck.length} cards left, types hidden` }, h('span', { class: 'mini-card dev' }, icon('dev-back')), h('b', { text: g.deck.length })),
     ),
   );
 }
