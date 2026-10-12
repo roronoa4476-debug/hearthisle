@@ -203,12 +203,12 @@ function renderPlayers(g, a, ui, me, room) {
       ),
       awards.length ? h('span', { class: 'awards' }, awards) : null,
       amHost && away && !member.host ? btn('Remove', () => a.remove(member.id, P.name, true), { class: 'seat-btn danger', 'aria-label': `Remove ${P.name} from the game` }) : null,
-      empty && me === null && g.winner === null ? btn('Take seat', () => a.takeSeat(p, P.name), { class: 'seat-btn', 'aria-label': `Take over ${P.name}’s seat` }) : null,
+      empty && !room?.practice && me === null && g.winner === null ? btn('Take seat', () => a.takeSeat(p, P.name), { class: 'seat-btn', 'aria-label': `Take over ${P.name}’s seat` }) : null,
     );
   });
   const watchers = members.filter((m) => m.role === 'spectator' || m.seat < 0 && room?.phase === 'game');
   $('players').replaceChildren(
-    panelTitle('Players', room ? h('small', { text: `Room ${room.code}` }) : null),
+    panelTitle(room?.practice ? 'Practice' : 'Players', room ? h('small', { text: `Room ${room.code}` }) : null),
     h('div', { class: 'player-list', role: 'list' }, ...rows),
     ...(watchers.length ? [h('p', { class: 'watchers' }, h('span', { class: 'eye', 'aria-hidden': 'true' }), `Watching: ${watchers.map((m) => m.name + (m.connected ? '' : ' (away)')).join(', ')}`)] : []),
   );
@@ -550,7 +550,7 @@ function renderModal(g, a, ui, me, room) {
     el = modal(`${name(g.winner)} wins!`, [
       h('div', { class: 'winner-art' }, mark(g.winner)),
       h('p', { text: `${R.victoryPoints(g, g.winner, true)} victory points, including ${g.players[g.winner].dev.filter((c) => c.type === 'vp').length} hidden point cards.` }),
-      room.you?.host ? btn('Back to the lobby', () => a.backToLobby(false), { class: 'btn wide' }) : h('p', { class: 'muted center', text: 'The host can start another island.' }),
+      room.you?.host ? btn(room.practice ? 'New practice island' : 'Back to the lobby', room.practice ? a.practiceReset : () => a.backToLobby(false), { class: 'btn wide' }) : h('p', { class: 'muted center', text: 'The host can start another island.' }),
     ], a, false);
   } else if (me !== null && R.mustDiscard(g, me)) {
     const need = g.discards.find((d) => d.p === me).n;
@@ -565,7 +565,10 @@ function renderModal(g, a, ui, me, room) {
       h('div', { class: 'invite well' }, h('div', {}, h('small', { text: `Room ${room.code}` }), h('b', { class: 'invite-link', text: inviteLink(room) })), btn(ui.copied ? 'Copied!' : 'Copy link', a.copyInvite, { class: 'btn small wood' })),
       btn('How to play', () => a.ui({ panel: 'help' }), { class: 'btn wood wide' }),
       btn('Full move history', () => a.ui({ panel: 'history' }), { class: 'btn wood wide' }),
-      room.you?.host ? btn('End this game and return to the lobby', () => a.backToLobby(true), { class: 'btn red wide' }) : null,
+      ...(room.practice ? [h('p', { text: 'Solo practice: the two opponents pass automatically. Normal building, dice and card rules still apply. Refill sets your resources to 12 of each and theirs to 3 of each.' }),
+        ...(room.you?.host ? [btn('Refill practice resources', a.practiceRefill, { class: 'btn wood wide', disabled: !R.tradeOpen(g) || !!g.offer }), btn('New practice island', a.practiceReset, { class: 'btn wood wide' })] : []),
+      ] : []),
+      room.you?.host && !room.practice ? btn('End this game and return to the lobby', () => a.backToLobby(true), { class: 'btn red wide' }) : null,
       btn('Leave the room', a.leave, { class: 'linkish' }),
     ], a);
   } else if (ui.panel === 'help') {

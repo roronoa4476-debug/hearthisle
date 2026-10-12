@@ -79,6 +79,46 @@ export const seated = (room) => [...room.members.values()].filter((m) => m.role 
 export const freeColors = (room) => COLORS.map((_, i) => i).filter((c) => !seated(room).some((m) => m.color === c));
 export const seatOf = (room, token) => (room.game ? room.seatTokens.indexOf(token) : -1);
 
+// Practice is a separate room, never a privilege that can be enabled in a live game.
+export function createPracticeRoom(token, name = 'Tester') {
+  const room = createRoom();
+  if (!room) return null;
+  join(room, token, name);
+  room.practice = true;
+  startPractice(room, token);
+  return room;
+}
+
+function stockPractice(room) {
+  const g = structuredClone(room.game);
+  for (const r of R.RES) {
+    for (const pl of g.players) { g.bank[r] += pl.res[r]; pl.res[r] = 0; }
+    g.players[0].res[r] = 12;
+    g.players[1].res[r] = g.players[2].res[r] = 3;
+    g.bank[r] -= 18;
+  }
+  room.game = g;
+}
+
+function startPractice(room, token) {
+  const m = room.members.get(token);
+  m.role = 'player';
+  m.color = 0;
+  room.phase = 'game';
+  room.seatTokens = [token, null, null];
+  room.game = R.createGame({ autoSetup: true, rng: secureRandom, seats: [
+    { name: m.name, color: 0 }, { name: 'Practice Blue', color: 1 }, { name: 'Practice White', color: 2 },
+  ] });
+  // The first action phase is ready to try; subsequent turns use ordinary dice/rules.
+  room.game.phase = 'main';
+  room.game.log[0] = { ...room.game.log[0], text: 'Solo practice ready: build, trade with the bank, or try a development card.' };
+  for (const type of R.DEV_TYPES) {
+    room.game.deck.splice(room.game.deck.indexOf(type), 1);
+    room.game.players[0].dev.push({ type, turn: 0 });
+  }
+  stockPractice(room);
+}
+
 function changed(room, meaningful = true) {
   room.touched = Date.now();
   if (meaningful) {
@@ -105,6 +145,15 @@ export function lobby(room, token, msg) {
   if (!m) return false;
   const isHost = room.hostToken === token;
   switch (msg.type) {
+    case 'practiceRefill':
+      if (!room.practice || !isHost || seatOf(room, token) !== 0 || !R.tradeOpen(room.game) || room.game.offer) return false;
+      stockPractice(room);
+      break;
+    case 'practiceReset':
+      if (!room.practice || !isHost) return false;
+      Object.values(room.timers).forEach(clearTimeout);
+      startPractice(room, token);
+      break;
     case 'setName':
       m.name = cleanName(msg.name);
       if (room.game) {
@@ -133,7 +182,7 @@ export function lobby(room, token, msg) {
     }
     case 'takeSeat': {
       // a spectator takes over a seat whose player was removed
-      if (room.phase !== 'game' || !room.game || room.game.winner !== null) return false;
+      if (room.practice || room.phase !== 'game' || !room.game || room.game.winner !== null) return false;
       if (!isInt(msg.seat, 0, room.game.playerCount - 1) || room.seatTokens[msg.seat] !== null) return false;
       if (seatOf(room, token) >= 0) return false;
       room.seatTokens[msg.seat] = token;
@@ -167,6 +216,7 @@ export function lobby(room, token, msg) {
       break;
     }
     case 'backToLobby':
+      if (room.practice) return false;
       if (!isHost || room.phase !== 'game' || (room.game && room.game.winner === null && !msg.force)) return false;
       Object.values(room.timers).forEach(clearTimeout);
       room.phase = 'lobby';
@@ -346,6 +396,7 @@ export function viewFor(room, token) {
       code: room.code,
       phase: room.phase,
       options: room.options,
+      practice: !!room.practice,
       version: room.version,
       restoring: holding(room),
       vacant: room.seatTokens.flatMap((t, i) => (t === null ? [i] : [])),
@@ -389,6 +440,7 @@ export function snapshotOf(room) {
     hostToken: room.hostToken,
     phase: room.phase,
     options: room.options,
+    practice: !!room.practice,
     game: room.game ? { ...room.game, toast: null } : null,
     seatTokens: room.seatTokens,
     removed: [...(room.removed || [])],
@@ -410,6 +462,7 @@ export function restoreRoom(data) {
   room.hostToken = data.hostToken;
   room.phase = data.phase === 'game' && data.game ? 'game' : 'lobby';
   room.options = { quick: !!data.options?.quick };
+  room.practice = data.practice === true;
   room.game = room.phase === 'game' ? data.game : null;
   room.seatTokens = Array.isArray(data.seatTokens) ? data.seatTokens.map((t) => (typeof t === 'string' ? t : null)) : [];
   room.removed = new Set(Array.isArray(data.removed) ? data.removed : []);

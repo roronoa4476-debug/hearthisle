@@ -35,6 +35,21 @@ function client() {
   return {sockets, timers, location, get actions(){return actions;}, get state(){return state;}, open(){sockets.at(-1).emit('open');}, tick(){const [id,timer]=timers.entries().next().value;timers.delete(id);timer.fn();return timer.ms;}};
 }
 const roomMessage = () => ({type:'room',room:{code:'GOOD',version:1,you:{name:'Tester',seat:0},phase:'lobby'},game:null});
+test('the name code creates a separate practice room and reconnects to that room', () => {
+  const c = client();
+  c.actions.draft({ nameDraft: ' /TEST ' });
+  c.actions.joinRoom();
+  c.open();
+  const socket = c.sockets.at(-1);
+  assert.equal(socket.sent[0].practice, true);
+  assert.equal(socket.sent[0].room, null, 'an invitation must not be modified by the code');
+  assert.equal(socket.sent[0].name, 'Tester');
+  socket.message({ ...roomMessage(), room: { ...roomMessage().room, practice: true } });
+  socket.emit('close');
+  c.tick(); c.open();
+  assert.equal(c.sockets.at(-1).sent[0].room, 'GOOD');
+  assert.equal(c.sockets.at(-1).sent[0].practice, false, 'reconnecting must not create another practice island');
+});
 for (const code of ['full','no-room','removed',undefined]) test(`rejected join (${code??'other'}) stops retries and clears stale invitation`, () => {
   const c=client();c.open();c.sockets[0].message({type:'error',code,message:'Join rejected'});
   assert.equal(c.timers.size,0);assert.equal(c.state.status,'home');assert.equal(c.state.inviteCode,null);assert.equal(c.location.search,'');assert.equal(c.sockets.length,1);

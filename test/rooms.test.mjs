@@ -5,6 +5,66 @@ import * as R from '../public/js/rules.js';
 
 const tok = (n) => n.toString(16).padStart(32, '0');
 
+test('practice starts solo with legal stock and playable development cards', () => {
+  const room = Rooms.createPracticeRoom(tok(90), 'Tester');
+  assert.equal(room.phase, 'game');
+  assert.equal(room.members.size, 1);
+  assert.deepEqual(room.seatTokens, [tok(90), null, null]);
+  assert.equal(room.game.cur, 0);
+  assert.equal(room.game.phase, 'main');
+  assert.ok(R.validSavedGame(room.game));
+  assert.deepEqual(room.game.players[0].res, Object.fromEntries(R.RES.map(r => [r, 12])));
+  for (const type of R.DEV_TYPES.filter(t => t !== 'vp')) assert.ok(R.canPlayDev(room.game, type));
+  assert.equal(Rooms.act(room, tok(90), 'buyDevCard'), true);
+  assert.equal(room.game.players[0].dev.length, 6);
+  assert.equal(Rooms.lobby(room, tok(90), { type: 'practiceRefill' }), true);
+  assert.equal(room.game.players[0].res.ore, 12);
+  assert.ok(R.validSavedGame(room.game));
+  // Passive seats continue until the human can act (possibly a normal discard on 7).
+  assert.equal(Rooms.act(room, tok(90), 'endTurn'), true);
+  assert.ok(room.game.cur === 0 || R.mustDiscard(room.game, 0));
+  assert.ok(R.validSavedGame(room.game));
+});
+
+test('practice permissions cannot grant resources or reset a normal room', () => {
+  const normal = lobbyWith(['Host', 'Ali', 'Sara']);
+  Rooms.lobby(normal, tok(1), { type: 'setOption', quick: true });
+  Rooms.lobby(normal, tok(1), { type: 'start' });
+  const before = JSON.stringify(Rooms.snapshotOf(normal).game);
+  for (const type of ['practiceRefill', 'practiceReset']) {
+    assert.equal(Rooms.lobby(normal, tok(1), { type }), false);
+    assert.equal(Rooms.act(normal, tok(1), type), false);
+  }
+  Rooms.lobby(normal, tok(1), { type: 'setName', name: '/test' });
+  assert.equal(Rooms.lobby(normal, tok(1), { type: 'practiceRefill' }), false);
+  assert.deepEqual(normal.game.players, JSON.parse(before).players);
+  const practice = Rooms.createPracticeRoom(tok(91));
+  Rooms.join(practice, tok(92), 'Watcher');
+  assert.equal(Rooms.lobby(practice, tok(92), { type: 'practiceRefill' }), false);
+  assert.equal(Rooms.lobby(practice, tok(92), { type: 'practiceReset' }), false);
+  assert.equal(Rooms.lobby(practice, tok(92), { type: 'takeSeat', seat: 1 }), false);
+  assert.equal(Rooms.viewFor(practice, tok(92)).game.players[0].dev[0].type, 'hidden');
+});
+
+test('practice refills cannot bypass pending resolutions and practice survives restore', () => {
+  const room = Rooms.createPracticeRoom(tok(93));
+  room.game = R.resolveRoll(R.startRoll({ ...room.game, phase: 'roll' }), [3, 4]);
+  assert.equal(room.game.mode, 'discard');
+  assert.equal(Rooms.lobby(room, tok(93), { type: 'practiceRefill' }), false);
+  const data = Rooms.snapshotOf(room);
+  Rooms._rooms.delete(room.code);
+  const restored = Rooms.restoreRoom(data);
+  assert.equal(Rooms.viewFor(restored, tok(93)).room.practice, true);
+  assert.ok(R.validSavedGame(restored.game));
+  assert.equal(Rooms.lobby(restored, tok(93), { type: 'practiceReset' }), true);
+  assert.equal(restored.game.mode, null);
+  assert.equal(restored.game.players[0].dev.length, 5);
+  assert.equal(restored.game.cur, 0);
+  assert.equal(restored.game.phase, 'main');
+  assert.ok(R.validSavedGame(restored.game));
+  clearTimeout(restored.timers.hold);
+});
+
 function lobbyWith(names) {
   const room = Rooms.createRoom();
   names.forEach((name, i) => Rooms.join(room, tok(i + 1), name));

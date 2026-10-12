@@ -140,7 +140,9 @@ function attachRooms(server) {
         if (room) return;
         token = typeof msg.token === 'string' && /^[a-f0-9]{32}$/.test(msg.token) ? msg.token : null;
         if (!token) return send(ws, { type: 'error', message: 'Bad session. Reload the page.' });
-        room = msg.room ? Rooms.getRoom(msg.room) : Rooms.createRoom();
+        // A practice request can only create a fresh room, never modify a requested room.
+        const practice = msg.practice === true && !msg.room;
+        room = practice ? Rooms.createPracticeRoom(token, msg.name) : msg.room ? Rooms.getRoom(msg.room) : Rooms.createRoom();
         // Server restarted? The browser's sealed copy brings the room back.
         if (msg.room && msg.snapshot) {
           const data = unseal(msg.snapshot);

@@ -25,6 +25,8 @@ Settle an island, roll for resources, trade with each other and the bank, build 
 
 ## Play online with friends
 
+For solo practice, enter **`/test`** as your name and press **Create a room**. This opens a separate practice island with two passive opponents, 12 of every resource and one of each development-card type. The game menu has **Refill practice resources** (during an unblocked action phase) and **New practice island**. Dice, discards, placement and development-card timing still follow the normal rules. Player-to-player trade responses are not automated. Practice commands cannot grant resources in ordinary multiplayer rooms.
+
 1. Open the game and type your name, then **Create a room**.
 2. **Copy link** and send it to your friends (or tell them the 4-letter room code). When they open it, it asks their name first.
 3. Everyone picks a colour. Anyone who just wants to watch picks **Just watch**.

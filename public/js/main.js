@@ -27,6 +27,7 @@ let room = null;
 let game = null;
 let ws = null;
 let retry = 0;
+let practiceRequest = false;
 const savedName = (store.get('hearthisle-name') || '').trim();
 // Opening an invite link asks for your name first (unless this browser already knows it).
 let wantConnection = !!roomCode && !!savedName;
@@ -84,7 +85,7 @@ function connect() {
   socket.addEventListener('open', () => {
     if (socket !== ws) return;
     const snapshot = roomCode ? store.get(`hearthisle-snap-${roomCode}`) : null;
-    socket.send(JSON.stringify({ type: 'hello', room: roomCode, token, name: (ui.nameDraft || '').trim() || undefined, snapshot: snapshot || undefined }));
+    socket.send(JSON.stringify({ type: 'hello', room: roomCode, token, name: (ui.nameDraft || '').trim() || undefined, practice: practiceRequest && !roomCode, snapshot: snapshot || undefined }));
   });
   socket.addEventListener('message', (event) => {
     if (socket !== ws) return;
@@ -121,6 +122,7 @@ function connect() {
     const hadOffer = !!game?.offer;
     const oldToast = game?.toast?.id;
     room = msg.room;
+    practiceRequest = false;
     game = msg.game;
     ui.status = 'online';
     ui.error = '';
@@ -200,6 +202,8 @@ const actions = {
     draw();
   },
   createRoom() {
+    practiceRequest = ui.nameDraft.trim().toLowerCase() === '/test';
+    if (practiceRequest) ui.nameDraft = 'Tester';
     store.set('hearthisle-name', ui.nameDraft.trim());
     roomCode = null;
     ui.inviteCode = null;
@@ -207,6 +211,7 @@ const actions = {
     connect();
   },
   joinRoom() {
+    if (ui.nameDraft.trim().toLowerCase() === '/test') return actions.createRoom();
     store.set('hearthisle-name', ui.nameDraft.trim());
     roomCode = ui.inviteCode || ui.codeDraft.trim().toUpperCase();
     ui.inviteCode = null;
@@ -230,6 +235,7 @@ const actions = {
   },
   saveName() {
     const name = ui.nameDraft.trim();
+    if (name.toLowerCase() === '/test') return actions.createRoom();
     if (!name) return;
     store.set('hearthisle-name', name);
     send({ type: 'setName', name });
@@ -258,6 +264,8 @@ const actions = {
   spectate: () => send({ type: 'spectate' }),
   setQuick: (quick) => send({ type: 'setOption', quick }),
   start: () => send({ type: 'start' }),
+  practiceRefill: () => send({ type: 'practiceRefill' }),
+  practiceReset: () => { ui.panel = null; ui.devPage = 0; send({ type: 'practiceReset' }); },
   backToLobby: (force) => {
     if (force && !confirm('End this game for everyone and go back to the lobby?')) return;
     ui.panel = null;
