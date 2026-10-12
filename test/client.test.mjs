@@ -50,6 +50,16 @@ test('the name code creates a separate practice room and reconnects to that room
   assert.equal(c.sockets.at(-1).sent[0].room, 'GOOD');
   assert.equal(c.sockets.at(-1).sent[0].practice, false, 'reconnecting must not create another practice island');
 });
+test('practice preserves the saved player name used by other rooms', () => {
+  const c = client();
+  c.actions.draft({ nameDraft: 'Nightmare' });
+  c.actions.createRoom();
+  c.actions.leave();
+  c.actions.draft({ nameDraft: '/test' });
+  c.actions.createRoom(); c.open();
+  assert.equal(c.sockets.at(-1).sent[0].name, 'Nightmare');
+  assert.equal(c.sockets.at(-1).sent[0].practice, true);
+});
 for (const code of ['full','no-room','removed',undefined]) test(`rejected join (${code??'other'}) stops retries and clears stale invitation`, () => {
   const c=client();c.open();c.sockets[0].message({type:'error',code,message:'Join rejected'});
   assert.equal(c.timers.size,0);assert.equal(c.state.status,'home');assert.equal(c.state.inviteCode,null);assert.equal(c.location.search,'');assert.equal(c.sockets.length,1);

@@ -203,7 +203,7 @@ const actions = {
   },
   createRoom() {
     practiceRequest = ui.nameDraft.trim().toLowerCase() === '/test';
-    if (practiceRequest) ui.nameDraft = 'Tester';
+    if (practiceRequest) ui.nameDraft = (store.get('hearthisle-name') || '').trim() || 'Tester';
     store.set('hearthisle-name', ui.nameDraft.trim());
     roomCode = null;
     ui.inviteCode = null;
