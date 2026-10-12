@@ -78,7 +78,7 @@ const shuffle = (list, rng) => {
 export const rollDice = (rng = Math.random) => [1 + Math.floor(rng() * 6), 1 + Math.floor(rng() * 6)];
 
 function log(g, text, who = g.cur) {
-  g.log = [{ id: ++g.serial, text, color: player(g, who).color }, ...g.log].slice(0, 60);
+  g.log = [{ id: ++g.serial, text, color: player(g, who).color }, ...g.log];
 }
 // Notices. `text` is what everyone sees (null = nothing); `only` holds private
 // texts for particular seats, e.g. the card you drew. The server sends each
