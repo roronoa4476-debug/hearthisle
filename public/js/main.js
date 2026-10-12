@@ -227,8 +227,14 @@ const actions = {
     setTimeout(() => { ui.copied = false; draw(); }, 1800);
   },
   pickColor: (color) => send({ type: 'pickColor', color }),
-  remove: (id, who) => {
-    if (confirm(`Remove ${who} from this room?`)) send({ type: 'remove', id });
+  remove: (id, who, midGame) => {
+    const question = midGame
+      ? `Remove ${who} from the game?\n\nTheir turns will be played automatically (roll, then end turn) so the game can go on. Their pieces stay on the board, and a spectator can take over their seat.`
+      : `Remove ${who} from this room?`;
+    if (confirm(question)) send({ type: 'remove', id });
+  },
+  takeSeat: (seat, who) => {
+    if (confirm(`Take over ${who}’s seat? You’ll play their cards and pieces from now on.`)) send({ type: 'takeSeat', seat });
   },
   spectate: () => send({ type: 'spectate' }),
   setQuick: (quick) => send({ type: 'setOption', quick }),

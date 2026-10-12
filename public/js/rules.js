@@ -802,3 +802,15 @@ export function validSavedGame(g){
   if(g.phase==='setup'&&(!g.setup||!Array.isArray(g.setupOrder)))return false;
   return Number.isInteger(g.cur)&&!!g.players[g.cur]&&['setup','roll','main'].includes(g.phase)&&g.roadList.every(e=>!!G.edges[e]&&!!g.players[g.roads[e]])&&g.townList.every(v=>!!G.verts[v]&&!!g.players[g.settlements[v]?.p]);
 }
+
+/* ---------- helpers for online seats ---------- */
+export const vertexValue = (g, vid) => vertexScore(g, vid); // how productive a corner is
+export const hexCorners = (g, hid) => geo(g).hexes[hid]?.verts || [];
+/** A spectator took over an empty seat. */
+export function noteTakeover(s, p, name) {
+  const g = clone(s);
+  const colour = PLAYERS[g.seats?.[p]?.color ?? p].name;
+  log(g, `${name} takes over the ${colour} seat.`, p);
+  toast(g, `${name} takes over the ${colour} seat.`);
+  return g;
+}

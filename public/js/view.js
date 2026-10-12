@@ -183,6 +183,8 @@ function renderPlayers(g, a, ui, me, room) {
     const hidden = p === me ? R.victoryPoints(g, p, true) - visible : 0;
     const gained = g.gains?.[p] ? R.totalCards(g.gains[p]) : 0;
     const away = member && !member.connected;
+    const empty = !!room?.vacant?.includes(p);
+    const amHost = !!room?.you?.host;
     const awards = [g.longest === p && h('span', { class: 'award', text: `Longest Road · ${g.roadLens[p]}` }), g.army === p && h('span', { class: 'award', text: `Largest Army · ${pl.knights}` })].filter(Boolean);
     return h('div', {
       class: `player${g.cur === p ? ' current' : ''}${away ? ' away' : ''}`,
@@ -191,7 +193,7 @@ function renderPlayers(g, a, ui, me, room) {
       'aria-label': `${P.name}: ${visible} points, ${count(pl)} resource cards, ${pl.dev.length} development cards${g.cur === p ? ', playing now' : ''}${p === me ? ', you' : ''}${away ? ', disconnected' : ''}`,
     },
       playerMark(P),
-      h('span', { class: 'player-name', title: member?.host ? `${P.name} is hosting this room` : null }, h('span', { text: P.name }), p === me ? h('span', { class: 'tag you', text: 'You' }) : null, away ? h('span', { class: 'tag away', text: 'Away' }) : null, gained ? h('span', { class: 'gain-pop', text: `+${gained}` }) : null),
+      h('span', { class: 'player-name', title: member?.host ? `${P.name} is hosting this room` : null }, h('span', { text: P.name }), p === me ? h('span', { class: 'tag you', text: 'You' }) : null, away ? h('span', { class: 'tag away', text: 'Away' }) : null, empty ? h('span', { class: 'tag away', text: 'Autopilot', title: 'This player was removed. Their turns are played automatically.' }) : null, gained ? h('span', { class: 'gain-pop', text: `+${gained}` }) : null),
       h('span', { class: 'vp', title: hidden ? `${visible} visible + ${hidden} hidden` : 'Victory points' }, h('b', { text: visible + hidden }), h('small', { text: 'VP' })),
       h('span', { class: 'player-stats' },
         h('span', { class: 'stat', title: 'Resource cards' }, h('i', { class: 'card-glyph' }), String(count(pl))),
@@ -200,6 +202,8 @@ function renderPlayers(g, a, ui, me, room) {
         h('span', { class: 'stat', title: 'Longest road' }, icon('roads'), String(g.roadLens[p])),
       ),
       awards.length ? h('span', { class: 'awards' }, awards) : null,
+      amHost && away && !member.host ? btn('Remove', () => a.remove(member.id, P.name, true), { class: 'seat-btn danger', 'aria-label': `Remove ${P.name} from the game` }) : null,
+      empty && me === null && g.winner === null ? btn('Take seat', () => a.takeSeat(p, P.name), { class: 'seat-btn', 'aria-label': `Take over ${P.name}’s seat` }) : null,
     );
   });
   const watchers = members.filter((m) => m.role === 'spectator' || m.seat < 0 && room?.phase === 'game');

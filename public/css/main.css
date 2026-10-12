@@ -507,3 +507,10 @@ body.busy #board .layer button, body.busy #dock button, body.busy #right button 
 .dev-list { flex-shrink: 0; align-content: start; }
 .dev { align-items: start; }
 .dev .icon { align-self: center; }
+
+/* ---------- mid-game seat controls ---------- */
+.seat-btn {
+  grid-column: 1 / -1; justify-self: start; margin-top: 3px; min-height: 26px; padding: 0 10px; border: 0; border-radius: 7px;
+  font-size: 11.5px; font-weight: 900; color: #fff; background: #1f6fe0; box-shadow: 0 2px 0 #0c3f8a;
+}
+.seat-btn.danger { background: #c8372b; box-shadow: 0 2px 0 #8a2218; }

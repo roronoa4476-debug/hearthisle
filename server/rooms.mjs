@@ -91,7 +91,7 @@ function changed(room, meaningful = true) {
 /** After a restart, hold moves until every seated player is back or a few seconds pass. */
 export function holding(room) {
   if (!room.holdUntil) return false;
-  const everyoneBack = room.seatTokens.every((t) => room.members.get(t)?.connected > 0);
+  const everyoneBack = room.seatTokens.every((t) => t === null || room.members.get(t)?.connected > 0);
   if (everyoneBack || Date.now() >= room.holdUntil) {
     room.holdUntil = 0;
     return false;
@@ -120,12 +120,27 @@ export function lobby(room, token, msg) {
       break;
     }
     case 'remove': {
-      if (!isHost || room.phase !== 'lobby') return false;
+      if (!isHost) return false;
       const target = [...room.members.values()].find((x) => x.id === msg.id);
       if (!target || target.token === room.hostToken) return false;
+      const seat = seatOf(room, target.token);
+      if (seat >= 0) room.seatTokens[seat] = null; // the seat stays in the game, played by autopilot
       room.members.delete(target.token);
       room.removed = room.removed || new Set();
       room.removed.add(target.token);
+      autopilot(room);
+      break;
+    }
+    case 'takeSeat': {
+      // a spectator takes over a seat whose player was removed
+      if (room.phase !== 'game' || !room.game || room.game.winner !== null) return false;
+      if (!isInt(msg.seat, 0, room.game.playerCount - 1) || room.seatTokens[msg.seat] !== null) return false;
+      if (seatOf(room, token) >= 0) return false;
+      room.seatTokens[msg.seat] = token;
+      m.role = 'player';
+      m.color = room.game.seats[msg.seat].color;
+      room.game = { ...room.game, seats: room.game.seats.map((x, i) => (i === msg.seat ? { ...x, name: m.name } : x)) };
+      room.game = R.noteTakeover(room.game, msg.seat, m.name);
       break;
     }
     case 'spectate':
@@ -219,8 +234,67 @@ export function act(room, token, name, args = []) {
   }
   if (next === g) return false;
   room.game = next;
+  autopilot(room);
   changed(room);
   return true;
+}
+
+/* ---------- autopilot for seats whose player was removed ---------- */
+const vacant = (room, p) => room.seatTokens[p] === null;
+const pipScore = (g, vid) => R.vertexValue(g, vid);
+
+/** Play the simplest legal move for empty seats until a real person has to act. */
+export function autopilot(room) {
+  for (let guard = 0; guard < 80; guard++) {
+    const g = room.game;
+    if (!g || room.phase !== 'game' || g.winner !== null || g.rolling) return;
+    let next = g;
+    if (g.mode === 'discard') {
+      const d = g.discards.find((x) => vacant(room, x.p));
+      if (!d) return; // waiting for real people to discard
+      next = R.discardCards(g, randomCards(g.players[d.p].res, d.n), d.p);
+    } else if (!vacant(room, g.cur)) {
+      return;
+    } else if (g.offer) {
+      next = R.withdrawTrade(g);
+    } else if (g.phase === 'setup') {
+      if (g.setup.need === 'settlement') {
+        const best = R.validVertices(g).sort((a, b) => pipScore(g, b) - pipScore(g, a))[0];
+        next = R.placeAtVertex(g, best);
+      } else {
+        next = R.placeAtEdge(g, R.validEdges(g)[0]);
+      }
+    } else if (g.mode === 'robber') {
+      const targets = R.robberTargets(g);
+      // prefer a tile without the autopilot seat's own buildings
+      const own = (hid) => R.hexCorners(g, hid).some((v) => g.settlements[v]?.p === g.cur);
+      next = R.moveRobber(g, targets.find((h) => !own(h)) ?? targets[0], secureRandom);
+    } else if (g.mode === 'steal') {
+      next = R.stealFrom(g, g.victims[0], secureRandom);
+    } else if (g.mode === 'plenty') {
+      next = R.pickResource(g, R.RES.find((r) => g.bank[r] > 0));
+    } else if (g.mode === 'monopoly') {
+      next = R.pickResource(g, 'ore');
+    } else if (g.freeRoads > 0) {
+      const edge = R.validEdges(g)[0];
+      next = edge === undefined ? { ...g, freeRoads: 0, mode: null } : R.placeAtEdge(g, edge);
+    } else if (g.mode) {
+      next = R.cancelBuild(g);
+    } else if (g.phase === 'roll') {
+      next = R.resolveRoll(R.startRoll(g, secureRandom), R.rollDice(secureRandom), secureRandom);
+    } else if (g.phase === 'main') {
+      next = R.endTurn(g);
+    }
+    if (next === g) return; // nothing legal to do; never loop forever
+    room.game = next;
+  }
+}
+
+function randomCards(res, n) {
+  const pool = R.RES.flatMap((r) => Array(res[r]).fill(r));
+  const out = R.emptyRes();
+  for (let i = 0; i < n && pool.length; i++) out[pool.splice(randomInt(pool.length), 1)[0]]++;
+  return out;
 }
 
 function roll(room) {
@@ -232,6 +306,7 @@ function roll(room) {
   room.timers.roll = setTimeout(() => {
     if (!room.game?.rolling) return;
     room.game = R.resolveRoll(room.game, room.game.dice, secureRandom);
+    autopilot(room);
     changed(room);
     clearTimeout(room.timers.produce);
     room.timers.produce = setTimeout(() => {
@@ -273,6 +348,7 @@ export function viewFor(room, token) {
       options: room.options,
       version: room.version,
       restoring: holding(room),
+      vacant: room.seatTokens.flatMap((t, i) => (t === null ? [i] : [])),
       you: me ? { id: me.id, name: me.name, color: me.color, role: me.role, seat, host: room.hostToken === token } : null,
       members: [...room.members.values()]
         .sort((a, b) => a.joined - b.joined)
@@ -315,6 +391,7 @@ export function snapshotOf(room) {
     options: room.options,
     game: room.game ? { ...room.game, toast: null } : null,
     seatTokens: room.seatTokens,
+    removed: [...(room.removed || [])],
     members: [...room.members.values()].map(({ token, id, name, color, role, joined }) => ({ token, id, name, color, role, joined })),
   };
 }
@@ -334,7 +411,8 @@ export function restoreRoom(data) {
   room.phase = data.phase === 'game' && data.game ? 'game' : 'lobby';
   room.options = { quick: !!data.options?.quick };
   room.game = room.phase === 'game' ? data.game : null;
-  room.seatTokens = Array.isArray(data.seatTokens) ? data.seatTokens : [];
+  room.seatTokens = Array.isArray(data.seatTokens) ? data.seatTokens.map((t) => (typeof t === 'string' ? t : null)) : [];
+  room.removed = new Set(Array.isArray(data.removed) ? data.removed : []);
   room.members = new Map(data.members.map((m) => [m.token, { ...m, connected: live.get(m.token)?.connected || 0 }]));
   room.version = data.version;
   room.restoredFrom = data.version;
@@ -346,6 +424,7 @@ export function restoreRoom(data) {
     // Finish anything that was mid-animation when the server stopped.
     if (room.game.rolling) room.game = R.resolveRoll({ ...room.game, rolling: false }, room.game.dice, secureRandom);
     room.game = R.clearProducing(room.game);
+    autopilot(room);
   }
   return room;
 }

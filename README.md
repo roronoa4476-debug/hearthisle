@@ -25,6 +25,8 @@ Settle an island, roll for resources, trade with each other and the bank, build 
 3. Everyone picks a colour. Anyone who just wants to watch picks **Just watch**.
 4. The host chooses how opening settlements are placed and presses **Start game** (3–6 players). The host can also remove anyone from the lobby, for example a stranger who guessed the code.
 
+**If someone leaves for good mid-game,** the host presses **Remove** next to their name (it appears once they're away). Their seat goes on autopilot: it rolls, discards on a 7, moves the robber when it must, and ends its turn, so nobody waits. Their pieces stay on the board. Any spectator can press **Take seat** to take over that colour, with its cards and buildings, and play on.
+
 ## Put it online for free (Render)
 
 The game runs as one small Node server, which fits [Render's free plan](https://render.com/docs/free).
