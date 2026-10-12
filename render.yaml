@@ -2,7 +2,7 @@
 # Render reads this file when you create a "Blueprint" from the GitHub repo.
 services:
   - type: web
-    name: hearthisle
+    name: koolkatan
     runtime: node
     plan: free
     buildCommand: npm ci

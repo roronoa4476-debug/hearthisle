@@ -1,5 +1,7 @@
 # Koolkatan
 
+**[Play Koolkatan](https://koolkatan.onrender.com/)** — create a room and share its link with friends.
+
 Version **0.5.0** adds new resource and development-card artwork, readable development-card descriptions with paging, a slightly larger map with zoom and dragging, and the Koolkatan name.
 
 **A Catan-style island board game I built for the browser**, so my friends and I can play together for free.
@@ -36,7 +38,7 @@ The game runs as one small Node server, which fits [Render's free plan](https://
 
 1. Sign in to [render.com](https://render.com) with this GitHub account.
 2. Choose **New → Blueprint** and pick this repository. Render reads `render.yaml` and sets everything up.
-3. When it's live you get a link like `https://hearthisle.onrender.com`. Share that.
+3. When it's live, share the public address shown by Render. This project's game is at [koolkatan.onrender.com](https://koolkatan.onrender.com/).
 
 Free-plan notes: the server sleeps after 15 minutes with nobody connected, so the first person to open the link may wait up to a minute while it wakes. It stays awake while a game is being played.
 
