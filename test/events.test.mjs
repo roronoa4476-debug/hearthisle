@@ -94,9 +94,9 @@ test('building and buying: one event each, with the cost; free roads cost nothin
 test('illegal moves add no events', () => {
   const g = mainPhase();
   hand(g, g.cur, {});
+  // every one of these is refused (unaffordable, wrong phase or mode, not a legal spot)
   for (const next of [R.chooseBuild(g, 'city'), R.buyDevCard(g), R.bankTrade(g), R.endTurn({ ...g, mode: 'robber' }), R.placeAtEdge(g, 0), R.moveRobber(g, 3), R.startRoll(g)]) {
-    assert.equal(after(g, next).filter((e) => !['turn'].includes(e.type) || next === g).length, next === g ? 0 : after(g, next).length);
-    if (next !== g) assert.ok(after(g, next).every((e) => e.type !== 'build' && e.type !== 'buyDev'));
+    assert.equal(after(g, next).length, 0);
   }
 });
 
@@ -157,14 +157,12 @@ test('awards: an event only when Longest Road or Largest Army changes hands', ()
   const p = g.cur;
   g = { ...g, turn: 40 };
   g.players[p].dev = [0, 1, 2].map(() => ({ type: 'knight', turn: 0 }));
-  let knights = 0;
   const awards = [];
   for (let i = 0; i < 3; i++) {
     const before = { ...g, devPlayed: false };
     g = R.playDevCard(before, 'knight');
     awards.push(...after(before, g).filter((e) => e.type === 'award'));
     g = { ...R.moveRobber(g, G.hexes.find((h) => h.id !== g.robber).id, () => 0), mode: null, victims: [] };
-    knights++;
   }
   assert.deepEqual(awards.map((e) => [e.kind, e.from, e.to]), [['army', null, p]]);
 });
@@ -230,7 +228,7 @@ test('a stolen resource is shown only to the thief and the victim', () => {
   const thief = g.cur;
   const victim = (thief + 1) % 3;
   const hex = G.hexes.find((h) => h.id !== g.robber && h.verts.some((v) => g.settlements[v]?.p === victim) && !h.verts.some((v) => g.settlements[v] && g.settlements[v].p !== victim));
-  if (!hex) return; // board without a clean tile: nothing to check
+  assert.ok(hex, 'this board has a tile touching only the victim');
   for (const x of [0, 1, 2]) hand(g, x, x === victim ? { brick: 1 } : {});
   room.game = g;
   assert.equal(Rooms.act(room, tokenOf(room, thief), 'moveRobber', [hex.id]), true);
@@ -297,4 +295,32 @@ test('a whole bot game, as seen by each seat: every event plays exactly once, in
   // every seat saw the same public sequence of moves
   const publicIds = (s) => s.played.map((e) => `${e.id}:${e.type}`).join();
   for (const s of state) assert.equal(publicIds(s), publicIds(state[0]));
+});
+
+/* ---------- lighter, faster updates ---------- */
+test('bank trades carry their own choice; the old per-click setTrade message is gone', () => {
+  const room = humanRoom();
+  const g = { ...room.game, phase: 'main' };
+  const p = g.cur;
+  hand(g, p, { ore: 4 });
+  room.game = g;
+  const t = tokenOf(room, p);
+  assert.equal(Rooms.act(room, t, 'setTrade', [{ give: 'ore' }]), false);
+  assert.equal(Rooms.act(room, t, 'bankTrade', ['ore', 'nope']), false);
+  assert.equal(Rooms.act(room, t, 'bankTrade', ['ore', 'ore']), false);
+  assert.equal(Rooms.act(room, t, 'bankTrade', ['ore', 'wood']), true);
+  assert.equal(room.game.players[p].res.wood, 1);
+  assert.equal(Rooms.act(room, tokenOf(room, (p + 1) % 3), 'bankTrade', ['ore', 'wood']), false, 'only on your turn');
+});
+
+test('updates carry only recent moves; the full history is sent on request', () => {
+  const room = humanRoom();
+  room.game = { ...room.game, log: Array.from({ length: 120 }, (_, i) => ({ id: i, text: `move ${i}`, color: '#000' })) };
+  const view = Rooms.viewFor(room, tok(1)).game;
+  assert.equal(view.log.length, 30);
+  assert.equal(view.log[0].text, 'move 0', 'newest first, as before');
+  assert.equal(view.logCount, 120);
+  assert.equal(room.game.log.length, 120, 'nothing is lost on the server');
+  assert.equal(Rooms.historyFor(room).length, 120, 'opening the history panel gets every move');
+  assert.deepEqual(Rooms.historyFor(Rooms.createRoom()), [], 'a lobby has no history');
 });

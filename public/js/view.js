@@ -218,8 +218,8 @@ function renderBank(g) {
   $('bank').replaceChildren(
     panelTitle('Bank', h('small', { text: 'cards left' })),
     h('div', { class: 'bank-row' },
-      ...R.RES.map((r) => h('div', { class: `stack${low(g.bank[r]) ? ' low' : ''}`, title: `${g.bank[r]} ${R.RES_NAME[r]} in the bank` }, h('span', { class: `mini-card r-${r}` }, icon(r)), h('b', { text: g.bank[r] }))),
-      h('div', { class: 'stack', title: `${g.deck.length} development cards left in the face-down deck`, 'aria-label': `Development deck: ${g.deck.length} cards left, types hidden` }, h('span', { class: 'mini-card dev' }, icon('dev-back')), h('b', { text: g.deck.length })),
+      ...R.RES.map((r) => h('div', { class: `stack${low(g.bank[r]) ? ' low' : ''}`, 'data-res': r, title: `${g.bank[r]} ${R.RES_NAME[r]} in the bank` }, h('span', { class: `mini-card r-${r}` }, icon(r)), h('b', { text: g.bank[r] }))),
+      h('div', { class: 'stack', 'data-res': 'dev', title: `${g.deck.length} development cards left in the face-down deck`, 'aria-label': `Development deck: ${g.deck.length} cards left, types hidden` }, h('span', { class: 'mini-card dev' }, icon('dev-back')), h('b', { text: g.deck.length })),
     ),
   );
 }
@@ -294,16 +294,16 @@ function renderTrade(g, a, ui, me) {
     ),
   ];
   if (!playersTab) {
-    const t = g.trade;
+    const t = ui.bank;
     const ratio = R.harborRatio(g, me ?? g.cur, t.give);
     content.push(
       h('div', { class: 'row-label' }, h('span', { text: 'You give' }), h('span', { text: 'rate' })),
-      h('div', { class: 'chips' }, ...R.RES.map((r) => h('button', { type: 'button', class: `chip${t.give === r ? ' active' : ''}`, 'aria-pressed': String(t.give === r), 'aria-label': `Give ${R.RES_NAME[r]} at ${R.harborRatio(g, me ?? g.cur, r)} for 1`, disabled: !mine, onClick: () => a.setTrade({ give: r }) }, icon(r), h('span', { text: `${R.harborRatio(g, me ?? g.cur, r)}:1` })))),
+      h('div', { class: 'chips' }, ...R.RES.map((r) => h('button', { type: 'button', class: `chip${t.give === r ? ' active' : ''}`, 'aria-pressed': String(t.give === r), 'aria-label': `Give ${R.RES_NAME[r]} at ${R.harborRatio(g, me ?? g.cur, r)} for 1`, disabled: !mine, onClick: () => a.pickBankTrade({ give: r }) }, icon(r), h('span', { text: `${R.harborRatio(g, me ?? g.cur, r)}:1` })))),
       h('div', { class: 'row-label' }, h('span', { text: 'You get' }), h('span', { text: 'in bank' })),
-      h('div', { class: 'chips' }, ...R.RES.map((r) => h('button', { type: 'button', class: `chip${t.get === r ? ' active' : ''}`, 'aria-pressed': String(t.get === r), 'aria-label': `Get ${R.RES_NAME[r]}, ${g.bank[r]} in the bank`, disabled: !mine, onClick: () => a.setTrade({ get: r }) }, icon(r), h('span', { text: g.bank[r] })))),
+      h('div', { class: 'chips' }, ...R.RES.map((r) => h('button', { type: 'button', class: `chip${t.get === r ? ' active' : ''}`, 'aria-pressed': String(t.get === r), 'aria-label': `Get ${R.RES_NAME[r]}, ${g.bank[r]} in the bank`, disabled: !mine, onClick: () => a.pickBankTrade({ get: r }) }, icon(r), h('span', { text: g.bank[r] })))),
       h('div', { class: 'summary' },
         h('p', { text: t.give === t.get ? 'Pick two different resources.' : `${ratio} ${R.RES_NAME[t.give]} → 1 ${R.RES_NAME[t.get]}` }),
-        btn('Trade', a.bankTrade, { class: 'btn small', disabled: !mine || !R.bankTradeOk(g) }),
+        btn('Trade', a.bankTrade, { class: 'btn small', disabled: !mine || !R.bankTradeOk(g, t) }),
       ),
     );
   } else if (g.offer) {
@@ -370,7 +370,7 @@ function renderDevs(g, a, ui, me) {
     const list = pl.dev.filter((c) => c.type === type);
     const playable = mine && R.canPlayDev(g, type);
     const note = type === 'vp' ? 'Hidden point' : !mine ? 'On your turn' : list.every((c) => c.turn >= g.turn) ? 'Next turn' : g.devPlayed ? 'One per turn' : 'Not now';
-    return h('article', { class: `dev-card${type === 'vp' ? ' dev-vp' : ''}`, 'aria-label': R.DEV_NAME[type] },
+    return h('article', { class: `dev-card${type === 'vp' ? ' dev-vp' : ''}`, 'data-dev': type, 'aria-label': R.DEV_NAME[type] },
       h('div', { class: 'dev-art' }, icon(type)),
       h('div', { class: 'dev-copy' },
         h('h3', { class: 'dev-name' }, R.DEV_NAME[type], h('span', { class: 'dev-count', text: `×${list.length}`, 'aria-label': `${list.length} ${list.length === 1 ? 'card' : 'cards'}` })),
@@ -595,7 +595,7 @@ function renderModal(g, a, ui, me, room) {
     el = modal('Menu', [
       h('div', { class: 'invite well' }, h('div', {}, h('small', { text: `Room ${room.code}` }), h('b', { class: 'invite-link', text: inviteLink(room) })), btn(ui.copied ? 'Copied!' : 'Copy link', a.copyInvite, { class: 'btn small wood' })),
       btn('How to play', () => a.ui({ panel: 'help' }), { class: 'btn wood wide' }),
-      btn('Full move history', () => a.ui({ panel: 'history' }), { class: 'btn wood wide' }),
+      btn('Full move history', a.showHistory, { class: 'btn wood wide' }),
       ...(room.practice ? [h('p', { text: 'Solo practice: the two opponents pass automatically. Normal building, dice and card rules still apply. Refill sets your resources to 12 of each and theirs to 3 of each.' }),
         ...(room.you?.host ? [btn('Refill practice resources', a.practiceRefill, { class: 'btn wood wide', disabled: !R.tradeOpen(g) || !!g.offer }), btn('New practice island', a.practiceReset, { class: 'btn wood wide' })] : []),
       ] : []),
@@ -617,7 +617,12 @@ function renderModal(g, a, ui, me, room) {
       ] : []),
     ], a);
   } else if (ui.panel === 'history') {
-    el = modal('Move history', [h('ol', { class: 'history' }, ...g.log.map((e) => h('li', { text: e.text })))], a);
+    // recent moves show at once; the full list fills in when it arrives (newer moves on top)
+    const list = ui.history ? [...g.log.filter((e) => e.id > (ui.history[0]?.id ?? -1)), ...ui.history] : g.log;
+    el = modal('Move history', [
+      h('ol', { class: 'history' }, ...list.map((e) => h('li', { text: e.text }))),
+      !ui.history && (g.logCount || 0) > g.log.length ? h('p', { class: 'muted', text: 'Loading earlier moves…' }) : null,
+    ], a);
   }
   // Redrawing replaces the dialog, so keep its scroll position when it is the same dialog.
   const root = $('modal-root');

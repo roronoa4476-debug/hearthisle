@@ -52,10 +52,12 @@ const ui = {
   counter: null,
   toastHidden: null,
   deadline: null, // local time when the current turn timer runs out
+  bank: { give: 'wheat', get: 'ore' }, // the bank trade being prepared
+  history: null, // the full move list, fetched when the history panel opens
 };
 const sound = createSound({ muted: store.get('hearthisle-muted') === '1' });
 const effects = createEffects({ sound, seat: () => mySeat(), game: () => game || preview });
-globalThis.koolkatanFx = () => effects.stats; // for checking the animations keep up with the game
+globalThis.koolkatanFx = () => effects.stats; // in the browser console: are the animations keeping up?
 const timers = {};
 
 /* ---------- drawing ---------- */
@@ -125,6 +127,11 @@ function connect() {
       game = null;
       setBusy(false);
       socket.close();
+      draw();
+      return;
+    }
+    if (msg.type === 'history') {
+      ui.history = Array.isArray(msg.log) ? msg.log : [];
       draw();
       return;
     }
@@ -244,6 +251,7 @@ setInterval(paintTimer, 250);
 const actions = {
   ui(patch) {
     Object.assign(ui, patch);
+    if (ui.panel !== 'history') ui.history = null; // fetched again next time it opens
     draw();
   },
   draft(patch) {
@@ -355,8 +363,9 @@ const actions = {
   playDevCard: (type) => { ui.panel = null; sendAction('playDevCard', [type]); },
   pickResource: act('pickResource'),
   discard: () => sendAction('discard', [ui.discard]),
-  setTrade: act('setTrade'),
-  bankTrade: act('bankTrade'),
+  pickBankTrade: (patch) => { Object.assign(ui.bank, patch); draw(); }, // a local choice: no round trip
+  bankTrade: () => sendAction('bankTrade', [ui.bank.give, ui.bank.get]),
+  showHistory: () => { ui.history = null; ui.panel = 'history'; send({ type: 'history' }); draw(); },
   propose: () => sendAction('propose', [ui.give, ui.get]),
   respond: (_seat, accept) => sendAction('respond', [accept]),
   confirm: act('confirm'),

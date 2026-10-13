@@ -20,10 +20,7 @@ export function freshEvents(prev, next, seen, { sync = false } = {}) {
   if (!newGame && next.serial < prev.serial) return { play: [], seen: newest }; // restored from an older backup
   const from = newGame ? 0 : seen;
   let play = events.filter((e) => e.id > from);
-  if (play.length > MAX_BATCH) {
-    const last = (type) => play.filter((e) => e.type === type).slice(-1);
-    play = [...last('turn'), ...last('win')].sort((a, b) => a.id - b.id);
-  }
+  if (play.length > MAX_BATCH) play = keepLast(play);
   return { play, seen: Math.max(from, newest) };
 }
 
@@ -35,12 +32,16 @@ export function shownPoints(g, me) {
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
 const sign = (n) => `${n > 0 ? '+' : '−'}${Math.abs(n)}`;
-const total = (basket) => Object.values(basket || {}).reduce((s, n) => s + n, 0);
+// Keep a long backlog short: the latest turn and win still play, in order.
+const keepLast = (events) => {
+  const last = (type) => events.filter((e) => e.type === type).slice(-1);
+  return [...last('turn'), ...last('win')].sort((a, b) => a.id - b.id);
+};
 
 export function createEffects({ sound, seat, game }) {
   const queue = [];
   let running = false;
-  // how well the animations keep up with the game (read by tests via koolkatanFx())
+  // how well the animations keep up with the game (for checking in a browser: koolkatanFx())
   const stats = { played: {}, waitedMax: 0, queueMax: 0 };
 
   /* where things are on screen */
@@ -50,9 +51,9 @@ export function createEffects({ sound, seat, game }) {
     row: (p) => $$('#players .player')[p],
     count: (p) => at.row(p)?.querySelector('.stat'),
     vp: (p) => at.row(p)?.querySelector('.vp'),
-    bank: (r) => $$('#bank .stack')[r === 'dev' ? 5 : R.RES.indexOf(r)],
+    bank: (r) => $(`#bank .stack[data-res="${r}"]`), // a resource, or 'dev' for the deck
     devs: () => $('#devs .dev-list') || $('#devs'),
-    devCard: (type) => $(`#devs .dev-card[aria-label="${R.DEV_NAME[type]}"]`),
+    devCard: (type) => $(`#devs .dev-card[data-dev="${type}"]`),
     dice: () => $('#turn .dice'),
     robber: () => $('#board .robber'),
     trade: () => $('#trade'),
@@ -83,11 +84,10 @@ export function createEffects({ sound, seat, game }) {
       else if (mine(c.p)) handDiff[c.res] = (handDiff[c.res] || 0) + c.n;
       else rows[c.p] = (rows[c.p] || 0) + c.n;
     }
-    const jobs = [];
-    for (const [r, n] of Object.entries(handDiff)) if (n) jobs.push(fx.react(() => at.card(r), n > 0 ? 'gain' : 'lose'), fx.chip(at.card(r), sign(n), n > 0));
-    for (const [p, n] of Object.entries(rows)) if (n) jobs.push(fx.react(() => at.count(+p), 'tick'), fx.chip(at.count(+p), sign(n), n > 0));
-    for (const [r, n] of Object.entries(bank)) if (n) jobs.push(fx.react(() => at.bank(r), 'tick'), fx.chip(at.bank(r), sign(n), n > 0));
-    Promise.all(jobs); // reactions finish on their own; the queue moves on
+    // reactions finish on their own while the queue moves on
+    for (const [r, n] of Object.entries(handDiff)) if (n) { fx.react(() => at.card(r), n > 0 ? 'gain' : 'lose'); fx.chip(() => at.card(r), sign(n), n > 0); }
+    for (const [p, n] of Object.entries(rows)) if (n) { fx.react(() => at.count(+p), 'tick'); fx.chip(() => at.count(+p), sign(n), n > 0); }
+    for (const [r, n] of Object.entries(bank)) if (n) { fx.react(() => at.bank(r), 'tick'); fx.chip(() => at.bank(r), sign(n), n > 0); }
   }
 
   /** Fly a basket of face-up cards from a player to the bank (paying, discarding). */
@@ -136,8 +136,8 @@ export function createEffects({ sound, seat, game }) {
 
     async robber(e) {
       sound.play('robber');
-      await fx.wait(300); // let the robber slide to its tile first
-      fx.hop(at.robber, 'translate(-50%, -88%)');
+      await fx.wait(300); // let the robber finish its 0.3 s slide to the new tile (main.css .robber)
+      fx.hop(at.robber);
     },
 
     async seven() {
@@ -190,7 +190,7 @@ export function createEffects({ sound, seat, game }) {
       landed([...a.map((res) => ({ p: e.a, res, n: -1 })), ...a.map((res) => ({ p: e.b, res, n: 1 })), ...b.map((res) => ({ p: e.b, res, n: -1 })), ...b.map((res) => ({ p: e.a, res, n: 1 }))]);
     },
 
-    async offer(e) {
+    offer(e) {
       if (seat() === null || mine(e.p)) return;
       sound.play('offer');
       fx.react(at.trade, 'nudge');
@@ -217,7 +217,7 @@ export function createEffects({ sound, seat, game }) {
       await fx.wait(250);
     },
 
-    async win() {
+    win() {
       sound.play('win');
       fx.confetti();
     },
@@ -247,17 +247,16 @@ export function createEffects({ sound, seat, game }) {
       if (!events.length) return;
       queue.push(...events.map((e) => ({ ...e, queuedAt: performance.now() })));
       stats.queueMax = Math.max(stats.queueMax, queue.length);
-      if (queue.length > MAX_BATCH) queue.splice(0, queue.length - MAX_BATCH);
+      if (queue.length > MAX_BATCH) queue.splice(0, queue.length, ...keepLast(queue));
       run();
     },
     /** Pop the points coin of anyone whose shown points went up. */
     points(before, after) {
       after.forEach((n, p) => {
         const d = n - (before[p] ?? n);
-        if (d > 0) { fx.react(() => at.vp(p), 'pop'); fx.chip(at.vp(p), sign(d)); }
+        if (d > 0) { fx.react(() => at.vp(p), 'pop'); fx.chip(() => at.vp(p), sign(d)); }
       });
     },
-    get busy() { return running || queue.length > 0; },
     stats,
   };
 }

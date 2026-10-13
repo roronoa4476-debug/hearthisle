@@ -79,7 +79,8 @@ export function createApp() {
 
 /* ---------- WebSocket rooms ---------- */
 function attachRooms(server) {
-  const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 512 * 1024 });
+  // Updates are JSON and compress well, so messages over 1 KB are deflated.
+  const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 512 * 1024, perMessageDeflate: { threshold: 1024 } });
   server.wss = wss;
   const sockets = new Map(); // room code -> Set of { ws, token }
 
@@ -172,6 +173,7 @@ function attachRooms(server) {
         return;
       }
       if (!room || msg.type === 'ping') return; // keep-alive from the browser
+      if (msg.type === 'history') return send(ws, { type: 'history', log: Rooms.historyFor(room) }); // the full move list, on request
       if (msg.type === 'action') {
         // Ignore an exact repeat within a moment (a double-click must not trade twice).
         const key = JSON.stringify([msg.name, msg.args]);

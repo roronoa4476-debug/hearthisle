@@ -92,7 +92,7 @@ function toast(g, text, only = null) {
 const tell = (g, p, text) => toast(g, null, { [p]: text }); // just for one seat
 // Events: exactly what just happened (cards moving, builds, turns...), so each
 // browser can animate and sound it once. Only the latest few are kept. The
-// server hides private details per seat (see viewFor in server/rooms.mjs).
+// server hides private details per seat (see eventsFor in server/rooms.mjs).
 export const MAX_EVENTS = 30;
 function emit(g, type, data = {}) {
   g.events = [...(g.events || []), { id: ++g.serial, type, ...data }].slice(-MAX_EVENTS);
@@ -232,8 +232,7 @@ export function canPlayDev(g, type) {
   return g.players[g.cur].dev.some((c) => c.type === type && c.turn < g.turn);
 }
 export const tradeOpen = (g) => g.phase === 'main' && g.winner === null && !isBlocking(g) && !g.rolling;
-export function bankTradeOk(g) {
-  const t = g.trade;
+export function bankTradeOk(g, t = g.trade) {
   return tradeOpen(g) && RES.includes(t.give) && RES.includes(t.get) && t.give !== t.get && g.bank[t.get] > 0 && g.players[g.cur].res[t.give] >= harborRatio(g, g.cur, t.give);
 }
 export function validVertices(g) {
@@ -480,7 +479,6 @@ export function resolveRoll(s, dice, rng = Math.random) {
       if (t) gains[t.p][r] += t.city ? 2 : 1;
     }
   }
-  const wanted = gains.map((gr) => ({ ...gr }));
   for(const r of RES){
     const receivers=gains.flatMap((gr,i)=>gr[r]>0?[i]:[]),need=gains.reduce((sum,gr)=>sum+gr[r],0);
     if(need>g.bank[r]){
@@ -504,7 +502,7 @@ export function resolveRoll(s, dice, rng = Math.random) {
       if (n > 0) { flows.push({ hex: hid, p: t.p, res: r, n }); left[t.p][r] -= n; }
     }
   }
-  emit(g, 'produce', { flows, shortage: RES.some((r) => wanted.some((gr, i) => gr[r] !== gains[i][r])) });
+  emit(g, 'produce', { flows });
   const describe = (gr) => RES.filter((r) => gr[r]).map((r) => `${gr[r]} ${RES_NAME[r]}`).join(', ');
   const personal = {};
   gains.forEach((gr, i) => { if (describe(gr)) personal[i] = `Rolled ${sum} — you collect ${describe(gr)}.`; });

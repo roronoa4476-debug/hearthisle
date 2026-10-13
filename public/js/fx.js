@@ -3,24 +3,28 @@
 // everything is drawn in a fixed overlay above the table, so the game's own
 // elements are never moved. People who ask for reduced motion get nothing.
 
-const reduced = () => globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+import { DEV_TYPES } from './rules.js';
 
-function layer(id = 'fx', z = 30) {
+const reduced = () => globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+export const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const quietly = (promise) => promise.catch(() => {}); // a cancelled animation is not an error
+
+/** The overlay animations are drawn in: 'fx' above the table, 'fx-top' above dialogs too. */
+function layer(id = 'fx') {
   let el = document.getElementById(id);
   if (!el) {
     el = document.createElement('div');
     el.id = id;
     el.className = 'fx-layer';
     el.setAttribute('aria-hidden', 'true');
-    el.style.setProperty('z-index', String(z));
     document.body.append(el);
   }
   return el;
 }
 
-/** Centre of an element (or a rect / {x, y}) on screen. */
+/** Centre on screen of an element, a function that finds one, a rect, or an {x, y} point. */
 export function centre(target) {
+  if (typeof target === 'function') target = target();
   if (!target) return null;
   if ('x' in target && 'y' in target && !('getBoundingClientRect' in target) && !('width' in target)) return target;
   const r = target.getBoundingClientRect ? target.getBoundingClientRect() : target;
@@ -28,10 +32,10 @@ export function centre(target) {
 }
 
 /** A small card: a resource (`wood`, `ore`…), a development type, or 'back' for a hidden card. */
-const DEV = ['knight', 'roads', 'plenty', 'monopoly', 'vp'];
+/** Show a card as a resource, a development card type, or 'back' (face down). */
 function face(el, kind) {
-  const back = kind === 'back' || kind === 'dev';
-  el.className = `fx-card mini-card ${back || DEV.includes(kind) ? 'dev' : `r-${kind}`}`;
+  const back = kind === 'back';
+  el.className = `fx-card mini-card ${back || DEV_TYPES.includes(kind) ? 'dev' : `r-${kind}`}`;
   el.firstChild.className = `icon i-${back ? 'dev-back' : kind}`;
 }
 function cardEl(kind) {
@@ -45,7 +49,7 @@ function cardEl(kind) {
  * Fly one card from `from` to `to` along a gentle arc.
  * `reveal`: the card starts face down and flips (flat) to this resource half-way.
  */
-export async function flyCard(kind, from, to, { delay = 0, duration = 560, lift = 60, reveal = null, keep = false } = {}) {
+export async function flyCard(kind, from, to, { delay = 0, duration = 560, lift = 60, reveal = null } = {}) {
   const a = centre(from);
   const b = centre(to);
   if (!a || !b || reduced()) return;
@@ -64,18 +68,12 @@ export async function flyCard(kind, from, to, { delay = 0, duration = 560, lift 
   if (reveal) {
     // a flat "flip": squash to a line, swap the face, open again
     await wait(duration * 0.38);
-    const squash = el.animate([{ scale: '1 1' }, { scale: '0 1' }], { duration: 90, fill: 'forwards' });
-    await squash.finished;
+    await quietly(el.animate([{ scale: '1 1' }, { scale: '0 1' }], { duration: 90, fill: 'forwards' }).finished);
     face(el, reveal);
     el.animate([{ scale: '0 1' }, { scale: '1 1' }], { duration: 90, fill: 'forwards' });
   }
-  await flight.finished;
-  if (!keep) el.remove();
-}
-
-/** Several cards from one place to another, one after the other. */
-export function flyCards(kinds, from, to, { stagger = 80, ...options } = {}) {
-  return Promise.all(kinds.map((kind, i) => flyCard(kind, from, to, { ...options, delay: (options.delay || 0) + i * stagger })));
+  await quietly(flight.finished);
+  el.remove();
 }
 
 /** Expand {wood: 2, ore: 1} into ['wood', 'wood', 'ore']. */
@@ -131,7 +129,7 @@ export function chip(target, text, good = true) {
     { transform: at(-10, 1), opacity: 1, offset: 0.25 },
     { transform: at(-26, 1), opacity: 1, offset: 0.75 },
     { transform: at(-34, 0.95), opacity: 0 },
-  ], { duration: 1100, easing: 'ease-out' }).finished.then(() => el.remove());
+  ], { duration: 1100, easing: 'ease-out' }).finished.catch(() => {}).then(() => el.remove());
 }
 
 /** A soft glow sweeping across an element (e.g. the player whose turn it is). */
@@ -152,35 +150,13 @@ export async function banner(text, over, { tone = 'turn' } = {}) {
   el.textContent = text;
   layer().append(el);
   const at = (dx, s) => `translate(${c.x + dx}px, ${c.y}px) translate(-50%, -50%) scale(${s})`;
-  await el.animate([
+  await quietly(el.animate([
     { transform: at(-40, 0.9), opacity: 0 },
     { transform: at(0, 1), opacity: 1, offset: 0.18 },
     { transform: at(0, 1), opacity: 1, offset: 0.78 },
     { transform: at(40, 0.96), opacity: 0 },
-  ], { duration: 1500, easing: 'ease-out' }).finished;
+  ], { duration: 1500, easing: 'ease-out' }).finished);
   el.remove();
-}
-
-/** Lift a copy of an element and move it to another place (e.g. an award changing hands). */
-export async function carry(el, to, { duration = 700 } = {}) {
-  const a = el?.getBoundingClientRect();
-  const b = centre(to);
-  if (!a || !b || reduced()) return;
-  const copy = el.cloneNode(true);
-  copy.classList.add('fx-copy');
-  copy.style.setProperty('width', `${a.width}px`);
-  copy.style.setProperty('height', `${a.height}px`);
-  layer().append(copy);
-  const from = { x: a.left + a.width / 2, y: a.top + a.height / 2 };
-  const mid = { x: (from.x + b.x) / 2 + 30, y: (from.y + b.y) / 2 };
-  const at = (p, s) => `translate(${p.x}px, ${p.y}px) translate(-50%, -50%) scale(${s})`;
-  await copy.animate([
-    { transform: at(from, 1) },
-    { transform: at(from, 1.15), offset: 0.15 },
-    { transform: at(mid, 1.2), offset: 0.55 },
-    { transform: at(b, 1) },
-  ], { duration, easing: 'cubic-bezier(.4,0,.2,1)', fill: 'forwards' }).finished;
-  copy.remove();
 }
 
 /** An award badge (e.g. "Longest Road") travelling from one player to another. */
@@ -194,13 +170,13 @@ export async function badge(text, from, to, { duration = 750 } = {}) {
   layer().append(el);
   const mid = { x: (a.x + b.x) / 2 + 40, y: (a.y + b.y) / 2 };
   const at = (p, s) => `translate(${p.x}px, ${p.y}px) translate(-50%, -50%) scale(${s})`;
-  await el.animate([
+  await quietly(el.animate([
     { transform: at(a, 0.8), opacity: 0 },
     { transform: at(a, 1.1), opacity: 1, offset: 0.15 },
     { transform: at(mid, 1.2), opacity: 1, offset: 0.55 },
     { transform: at(b, 1), opacity: 1, offset: 0.9 },
     { transform: at(b, 0.9), opacity: 0 },
-  ], { duration, easing: 'cubic-bezier(.4,0,.2,1)', fill: 'forwards' }).finished;
+  ], { duration, easing: 'cubic-bezier(.4,0,.2,1)', fill: 'forwards' }).finished);
   el.remove();
 }
 
@@ -208,7 +184,7 @@ export async function badge(text, from, to, { duration = 750 } = {}) {
 export function confetti(over = document.body, colours = ['#e0362c', '#1f6fe0', '#f5891c', '#2fa84a', '#8e44cf', '#f0b21b']) {
   if (reduced()) return Promise.resolve();
   const r = (over || document.body).getBoundingClientRect();
-  const host = layer('fx-top', 40); // above dialogs, so it stays bright
+  const host = layer('fx-top'); // above dialogs, so it stays bright
   const pieces = [];
   for (let i = 0; i < 110; i++) {
     const el = document.createElement('i');
@@ -222,18 +198,18 @@ export function confetti(over = document.body, colours = ['#e0362c', '#1f6fe0', 
     pieces.push(el.animate([
       { transform: `translate(${x}px, ${r.top - 20}px) rotate(0deg)`, opacity: 1 },
       { transform: `translate(${x + drift}px, ${r.top + fall}px) rotate(${spin}deg)`, opacity: 0 },
-    ], { duration: 1800 + Math.random() * 1400, delay: Math.random() * 500, easing: 'cubic-bezier(.2,.6,.4,1)' }).finished.then(() => el.remove()));
+    ], { duration: 1800 + Math.random() * 1400, delay: Math.random() * 500, easing: 'cubic-bezier(.2,.6,.4,1)' }).finished.catch(() => {}).then(() => el.remove()));
   }
   return Promise.all(pieces);
 }
 
-/** Hop an element on the spot, keeping its own positioning transform. */
-export function hop(target, base = '') {
+/** Hop an element on the spot (its own positioning transform is untouched). */
+export function hop(target) {
   return onElement(target, [
-    { transform: `${base} translateY(0)` },
-    { transform: `${base} translateY(-22%) scale(1.08)`, offset: 0.35 },
-    { transform: `${base} translateY(0) scale(.96)`, offset: 0.7 },
-    { transform: `${base} translateY(0)` },
+    { translate: '0 0', scale: '1' },
+    { translate: '0 -22%', scale: '1.08', offset: 0.35 },
+    { translate: '0 0', scale: '.96', offset: 0.7 },
+    { translate: '0 0', scale: '1' },
   ], { duration: 520, easing: 'ease-out' });
 }
 
@@ -242,4 +218,3 @@ export function flash(target, colour = 'rgba(200,55,43,.55)') {
   return onElement(target, [{ filter: 'none' }, { filter: `drop-shadow(0 0 10px ${colour}) brightness(1.05)`, offset: 0.3 }, { filter: 'none' }], { duration: 700 });
 }
 
-export { wait };

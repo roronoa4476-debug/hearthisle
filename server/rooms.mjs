@@ -8,11 +8,13 @@ import { botStep, wantsOffer } from './bots.mjs';
 export const COLORS = R.PLAYERS.map((p) => p.name); // 6 colours, index = colour id
 const CODE_LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const MAX_MEMBERS = 16;
+const MAX_SEATS = 6; // one per colour
 const MAX_ROOMS = 500; // protects a small free server from someone spamming new rooms
 const RESTORE_HOLD_MS = 8000; // after a restart, wait for everyone's backups before play resumes
 const BACKUP_MAX_AGE_MS = 3 * 24 * 60 * 60 * 1000;
 const ROLL_MS = 550;
 const PRODUCE_MS = 2200;
+const LOG_SENT = 30; // recent moves included in every update
 const BOT_MS = 850; // pause between bot moves so people can follow them
 const BOT_STEPS_PER_TURN = 60; // safety net: a bot that keeps acting ends its turn
 export const TIMER_CHOICES = [0, 60, 90, 120]; // turn timer in seconds (0 = off)
@@ -79,7 +81,7 @@ export function join(room, token, name) {
     // Lobby newcomers get the first free colour automatically; they can change it.
     if (room.phase === 'lobby') {
       const free = freeColors(room);
-      if (free.length && seated(room).length < 6) {
+      if (free.length) {
         m.color = free[0];
         m.role = 'player';
       }
@@ -98,7 +100,7 @@ export const isBotSeat = (room, p) => isBotToken(room, room.seatTokens[p]);
 /** Host adds a computer player on the first free colour. */
 export function addBot(room) {
   const free = freeColors(room);
-  if (room.phase !== 'lobby' || !free.length || seated(room).length >= 6 || room.members.size >= MAX_MEMBERS) return null;
+  if (room.phase !== 'lobby' || !free.length || room.members.size >= MAX_MEMBERS) return null;
   const used = new Set([...room.members.values()].map((m) => m.name));
   const name = BOT_NAMES.find((n) => !used.has(n)) || `${BOT_NAMES[0]} ${room.members.size}`;
   const token = `bot-${randomBytes(12).toString('hex')}`;
@@ -200,7 +202,6 @@ export function lobby(room, token, msg) {
       if (room.phase !== 'lobby' || !isInt(msg.color, 0, 5)) return false;
       const holder = seated(room).find((o) => o !== m && o.color === msg.color);
       if (holder && !holder.bot) return false; // taken by a person
-      if (!holder && m.role !== 'player' && seated(room).length >= 6) return false;
       const old = m.role === 'player' ? m.color : null;
       m.color = msg.color;
       m.role = 'player';
@@ -257,7 +258,7 @@ export function lobby(room, token, msg) {
     case 'start': {
       if (!isHost || room.phase !== 'lobby') return false;
       const players = seated(room).sort((a, b) => a.color - b.color);
-      if (players.length < 3 || players.length > 6) return false;
+      if (players.length < 3 || players.length > MAX_SEATS) return false;
       startGame(room, players);
       break;
     }
@@ -303,7 +304,7 @@ function startGame(room, players) {
 }
 
 /* ---------- game actions ---------- */
-const TURN_ACTIONS = new Set(['roll', 'endTurn', 'cancelBuild', 'chooseBuild', 'placeAtVertex', 'placeAtEdge', 'moveRobber', 'stealFrom', 'buyDevCard', 'playDevCard', 'pickResource', 'setTrade', 'bankTrade', 'propose', 'confirm', 'withdraw']);
+const TURN_ACTIONS = new Set(['roll', 'endTurn', 'cancelBuild', 'chooseBuild', 'placeAtVertex', 'placeAtEdge', 'moveRobber', 'stealFrom', 'buyDevCard', 'playDevCard', 'pickResource', 'bankTrade', 'propose', 'confirm', 'withdraw']);
 
 export function act(room, token, name, args = []) {
   const g = room.game;
@@ -336,14 +337,13 @@ export function act(room, token, name, args = []) {
         case 'buyDevCard': next = R.buyDevCard(g); break;
         case 'playDevCard': if (!R.DEV_TYPES.includes(a)) return false; next = R.playDevCard(g, a); break;
         case 'pickResource': if (!R.RES.includes(a)) return false; next = R.pickResource(g, a); break;
-        case 'setTrade': {
-          const patch = {};
-          if (R.RES.includes(a?.give)) patch.give = a.give;
-          if (R.RES.includes(a?.get)) patch.get = a.get;
-          next = R.setTrade(g, patch);
+        case 'bankTrade': { // the resource choice lives in the browser and comes with the trade
+          if (!R.RES.includes(a) || !R.RES.includes(b)) return false;
+          const prepared = R.setTrade(g, { give: a, get: b });
+          const traded = R.bankTrade(prepared);
+          next = traded === prepared ? g : traded; // a refused trade changes nothing
           break;
         }
-        case 'bankTrade': next = R.bankTrade(g); break;
         case 'propose': next = R.proposeTrade(g, basket(a), basket(b)); break;
         case 'confirm': if (!Number.isInteger(a)) return false; next = R.confirmTrade(g, a); break;
         case 'withdraw': next = R.withdrawTrade(g); break;
@@ -551,6 +551,9 @@ function roll(room) {
 }
 
 /* ---------- what each person is allowed to see ---------- */
+/** The whole move list (public), sent when someone opens the history panel. */
+export const historyFor = (room) => room.game?.log || [];
+
 /**
  * Events with private details removed: only the buyer learns which
  * development card was drawn, and only the thief and the victim learn which
@@ -574,6 +577,8 @@ export function viewFor(room, token) {
     const reveal = g.winner !== null;
     game = {
       ...g,
+      log: g.log.slice(0, LOG_SENT), // the full history is sent only when someone opens it
+      logCount: g.log.length,
       events: eventsFor(g, seat, reveal),
       toast: R.noticeFor(g.toast, seat >= 0 ? seat : null),
       deck: g.deck.map(() => null),

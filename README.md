@@ -2,7 +2,7 @@
 
 **[Play Koolkatan](https://koolkatan.onrender.com/)** — create a room and share its link with friends.
 
-Version **0.6.0** adds computer players (play solo or fill empty seats), game options (points to win, balanced map, friendly robber), an optional turn timer, one-click rematches, sound effects, and a phone-sized layout.
+Version **0.7.0** adds table animations: cards fly between the board, hands, players and the bank whenever resources are collected, paid, traded, discarded or stolen, with turn banners, award hand-overs and confetti for the winner. It also brings a wooden dice sound, smoother map zoom, people choosing colours before bots, and lighter, faster updates. Version 0.6.0 added computer players, game options, a turn timer, rematches, sound effects and a phone layout.
 
 **A Catan-style island board game I built for the browser**, so my friends and I can play together for free.
 
@@ -23,6 +23,7 @@ Settle an island, roll for resources, trade with each other and the bank, build 
 - **Bots:** play solo against computer players, or let the host add bots to fill seats. Bots place, roll, build, trade with the bank and harbours, play development cards, move the robber and answer your trade offers. They only use public information and their own hand.
 - **Game options:** the host picks points to win (8, 10 or 12), a random or balanced map (no touching 6s and 8s, terrain and odds spread out), the friendly robber (it can't target players with 2 points or fewer), and a turn timer (off, 1, 1½ or 2 minutes). When the timer runs out, that turn is finished automatically.
 - **Rematch:** after a win, the host starts a new island with the same players, bots and options in one click.
+- **Animations:** every card that changes hands is shown moving: production from the tiles, building costs to the bank, bank and player trades, discards on a 7, steals, Monopoly and Year of Plenty, plus bought and played development cards. Your own draws and steals flip to show the card; everyone else only sees a face-down card, so nothing private leaks. Turn banners, award hand-overs, point pops and winner confetti round it off. All flat and short, and switched off for people who prefer reduced motion.
 - **Sound effects:** dice, building, harvests, trades, the robber, your turn, the last seconds of the timer and the win. Generated in the browser (no sound files); the speaker button mutes them.
 - **Phones:** on a narrow screen the table becomes one scrolling column, with pinch-to-zoom on the map and bigger tap targets.
 - **Online rooms:** create a room, send the link, and everyone plays from their own computer or phone. Each player picks one of six colours (a colour can't be taken twice), or joins as a spectator. Refreshing the page puts you back in your seat.
@@ -80,7 +81,9 @@ Plain HTML, CSS and JavaScript modules with a small Node server: no frameworks. 
 | `public/js/pieces.js` | The wooden roads, settlements, cities and robber, drawn per player colour. |
 | `public/js/main.js` | Connects to the room, sends your moves, and redraws when the server updates. |
 | `public/js/map-view.js` | Fits the map and handles local zoom, dragging, pinch zoom and keyboard controls. |
-| `public/js/sound.js` | Synthesised sound effects, and which sounds a change on the table deserves. |
+| `public/js/sound.js` | Synthesised sound effects (preview them all at `/sounds.html`). |
+| `public/js/effects.js` | Turns game events into animations and sounds, each played once, in order. |
+| `public/js/fx.js` | The animation pieces: flying cards, chips, banners, confetti. |
 | `public/css/art.css` | The only file that points at artwork, so the art can be swapped without touching the code. |
 | `public/art/` | Terrain tiles, wood, sea and paper textures, and SVG/PNG icons. |
 | `server.mjs` | Serves the game and runs the WebSocket connection, with a strict content security policy. |

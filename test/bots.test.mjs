@@ -260,7 +260,6 @@ test('bots and options survive a server restart', () => {
   assert.notEqual(back.game.winner, null);
 });
 
-
 test('bots finish 12-point games, building roads for Longest Road once the board is full', () => {
   for (const count of [4, 6]) {
     const room = botTable(count, { quick: true, winPoints: 12 });
