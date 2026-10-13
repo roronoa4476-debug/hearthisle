@@ -41,7 +41,7 @@ export function createSound({ muted = false } = {}) {
   }
 
   /** A burst of filtered noise: dice, cards, wooden knocks. */
-  function noise({ at = 0, length = 0.06, volume = 0.35, freq = 1800, q = 1.2 } = {}) {
+  function noise({ at = 0, length = 0.06, volume = 0.35, freq = 1800, q = 1.2, filter: kind = 'bandpass' } = {}) {
     const t = ctx.currentTime + at;
     const frames = Math.max(1, Math.floor(ctx.sampleRate * length));
     const buffer = ctx.createBuffer(1, frames, ctx.sampleRate);
@@ -51,7 +51,7 @@ export function createSound({ muted = false } = {}) {
     const filter = ctx.createBiquadFilter();
     const gain = ctx.createGain();
     src.buffer = buffer;
-    filter.type = 'bandpass';
+    filter.type = kind;
     filter.frequency.value = freq;
     filter.Q.value = q;
     gain.gain.value = volume;
@@ -60,7 +60,7 @@ export function createSound({ muted = false } = {}) {
   }
 
   const SOUNDS = {
-    dice() { for (let i = 0; i < 7; i++) noise({ at: i * 0.055 + Math.random() * 0.02, length: 0.045, freq: 2200 + Math.random() * 1400, volume: 0.32 }); },
+    dice() { recordedDie(0, 0.24, WOOD); },
     build() { noise({ length: 0.05, freq: 900, q: 3, volume: 0.6 }); tone(190, { length: 0.12, type: 'triangle', volume: 0.25, slide: 0.7 }); },
     city() { noise({ length: 0.05, freq: 800, q: 3, volume: 0.6 }); noise({ at: 0.11, length: 0.05, freq: 700, q: 3, volume: 0.6 }); tone(160, { at: 0.11, length: 0.16, type: 'triangle', volume: 0.25, slide: 0.7 }); },
     road() { noise({ length: 0.04, freq: 1300, q: 4, volume: 0.45 }); },
@@ -82,6 +82,58 @@ export function createSound({ muted = false } = {}) {
     for (let i = 0; i < flicks; i++) {
       noise({ at, length: 0.032, freq: 2200 + Math.random() * 900, q: 0.9, volume: 0.14 + Math.random() * 0.04 });
       at += 0.042 + Math.random() * 0.014;
+    }
+  }
+
+  /**
+   * Dice modelled on a recorded roll: the first hits are nearly equally loud
+   * about 70 ms apart, then they speed up and fade as the die tumbles, and the
+   * last couple ring longer as it wobbles to a stop. Each hit is the die's own
+   * ping (~1.75 / 2.25 / 3.4 kHz) plus the surface it lands on.
+   */
+  const ROLL_GAPS = [0.08, 0.075, 0.07, 0.065, 0.06, 0.05, 0.045, 0.04, 0.03, 0.025];
+  const ROLL_LEVELS = [0, -1, -1.5, -2.5, -3.5, -5, -6.5, -8, -10, -13, -16]; // dB
+
+  /** A decaying sine: one ringing mode of the die or the table. */
+  function mode(t, f, peak, length) {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.frequency.value = f * (0.97 + Math.random() * 0.06);
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(Math.max(0.0002, peak), t + 0.0015);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + length);
+    osc.connect(gain).connect(master);
+    osc.start(t);
+    osc.stop(t + length + 0.02);
+  }
+
+  /**
+   * The table: a solid, thick hardwood "thock" — a short dull knock, a quick
+   * low thud that drops in pitch, and only a brief low ring (a long one sounds hollow).
+   */
+  const WOOD = { tones: [[420, 0.25, 0.018]], knock: { freq: 480, q: 0.7, length: 0.026, share: 0.85 }, thud: { freq: 170, share: 0.35, length: 0.035 }, pingRing: 0.8 };
+
+  function recordedHit(at, volume, surface, { ring = 1 } = {}) {
+    const t = ctx.currentTime + at;
+    const tilt = Math.random(); // which part is loudest varies from hit to hit
+    for (const [f, share, length] of surface.tones) mode(t, f, volume * (share + tilt * 0.15), length * ring * (0.8 + Math.random() * 0.4));
+    const p = surface.pingRing * ring * (0.8 + Math.random() * 0.4);
+    mode(t, 1760, volume * (0.45 - tilt * 0.12), 0.055 * p);
+    mode(t, 2270, volume * (0.36 - tilt * 0.08), 0.045 * p);
+    mode(t, 3400, volume * 0.2, 0.03 * p);
+    if (surface.knock) {
+      const k = surface.knock;
+      noise({ at, length: k.length, freq: k.freq * (0.9 + Math.random() * 0.2), q: k.q, filter: 'lowpass', volume: volume * k.share * 1.6 });
+    }
+    if (surface.thud) tone(surface.thud.freq, { at, length: surface.thud.length, type: 'sine', volume: volume * surface.thud.share, slide: 0.6 });
+    noise({ at, length: 0.008, freq: 3800, q: 0.6, volume: volume * 0.9 }); // the contact click
+  }
+  function recordedDie(start, volume, surface, hits = ROLL_LEVELS.length) {
+    let at = start;
+    for (let i = 0; i < hits; i++) {
+      const settling = i >= hits - 2; // the last hits wobble and ring longer
+      recordedHit(at, volume * 10 ** (ROLL_LEVELS[i] / 20), surface, { ring: settling ? 3 : 1 });
+      at += (ROLL_GAPS[i] ?? 0.02) * (0.85 + Math.random() * 0.3);
     }
   }
 

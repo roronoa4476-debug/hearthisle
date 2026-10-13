@@ -36,15 +36,30 @@ export function createMapView({ table, frame, viewport, board, zoomIn, zoomOut, 
   const touches = new Map(); // pointerId -> {x, y}, for two-finger pinch zoom
   let pinch = null;
 
-  function paint() {
+  // Smoothness: at most one update per screen frame, and while the map is
+  // moving the browser slides a ready-made picture of it ('moving' turns on
+  // will-change) instead of redrawing every tile; it sharpens again when still.
+  let pending = 0;
+  let settle = 0;
+  function apply() {
+    pending = 0;
     board.style.transform = `translate(-50%, -50%) translate(${view.x}px, ${view.y}px) scale(${view.zoom})`;
     label.textContent = `${Math.round(view.zoom * 100)}%`;
     zoomIn.disabled = view.zoom >= MAX_ZOOM;
     zoomOut.disabled = view.zoom <= MIN_ZOOM;
     viewport.classList.toggle('zoomed', view.zoom > MIN_ZOOM);
   }
+  function paint() {
+    if (!pending) pending = (globalThis.requestAnimationFrame || ((fn) => setTimeout(fn, 16)))(apply);
+  }
+  function moving() {
+    viewport.classList.add('moving');
+    clearTimeout(settle);
+    settle = setTimeout(() => viewport.classList.remove('moving'), 160);
+  }
   function zoomTo(zoom, anchor = { x: 0, y: 0 }) {
     view = zoomAt(view, zoom, anchor, size);
+    moving();
     paint();
   }
   function fit() {
@@ -104,6 +119,7 @@ export function createMapView({ table, frame, viewport, board, zoomIn, zoomOut, 
     if (!drag || event.pointerId !== drag.id) return;
     view = clampView({ ...view, x: drag.x + event.clientX - drag.startX, y: drag.y + event.clientY - drag.startY }, size);
     viewport.classList.add('dragging');
+    moving();
     paint();
   });
   function endDrag(event) {

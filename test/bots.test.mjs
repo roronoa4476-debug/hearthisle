@@ -118,7 +118,12 @@ test('lobby bots: host only, free colours only, removable in the lobby but not m
   const bots = [...room.members.values()].filter((m) => m.bot);
   assert.equal(new Set(bots.map((b) => b.name)).size, 4, 'each bot has its own name');
   assert.equal(new Set(Rooms.seated(room).map((m) => m.color)).size, 6);
-  assert.equal(Rooms.lobby(room, tok(2), { type: 'pickColor', color: bots[0].color }), false, 'a bot’s colour is taken');
+  const aliOld = room.members.get(tok(2)).color;
+  const botOld = bots[0].color;
+  assert.equal(Rooms.lobby(room, tok(2), { type: 'pickColor', color: botOld }), true, 'people can take a bot’s colour');
+  assert.equal(room.members.get(tok(2)).color, botOld);
+  assert.equal(bots[0].color, aliOld, 'the bot moves to the colour Ali left');
+  assert.equal(Rooms.lobby(room, tok(2), { type: 'pickColor', color: room.members.get(tok(1)).color }), false, 'a person’s colour stays taken');
   assert.equal(Rooms.lobby(room, tok(1), { type: 'remove', id: bots[0].id }), true);
   assert.equal(room.removed?.has(bots[0].token) ?? false, false);
   assert.equal(Rooms.lobby(room, tok(1), { type: 'start' }), true);
@@ -126,6 +131,18 @@ test('lobby bots: host only, free colours only, removable in the lobby but not m
   const view = Rooms.viewFor(room, tok(2)).room;
   assert.ok(view.members.filter((m) => m.bot).every((m) => m.connected));
   assert.equal(view.members.find((m) => m.bot).name, 'Clover', 'bots have plain names; the Bot tag marks them');
+});
+
+test('a spectator taking a bot’s colour when the table is full sends the bot away', () => {
+  const room = Rooms.createRoom();
+  Rooms.join(room, tok(1), 'Host');
+  for (let i = 0; i < 5; i++) Rooms.lobby(room, tok(1), { type: 'addBot' });
+  Rooms.join(room, tok(2), 'Late');
+  assert.equal(room.members.get(tok(2)).role, 'spectator', 'no colour was free');
+  const bot = [...room.members.values()].find((m) => m.bot);
+  assert.equal(Rooms.lobby(room, tok(2), { type: 'pickColor', color: bot.color }), true);
+  assert.equal(room.members.has(bot.token), false);
+  assert.equal(Rooms.seated(room).length, 6);
 });
 
 test('options are validated and only the host can change them', () => {

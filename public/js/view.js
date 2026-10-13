@@ -483,13 +483,14 @@ function lobbyModal(a, ui, room) {
   const colorButtons = R.PLAYERS.map((P, c) => {
     const owner = room.members.find((m) => m.role === 'player' && m.color === c);
     const mine = owner && owner.id === you.id;
+    const person = owner && !mine && !owner.bot; // a bot's colour can still be picked; the bot moves
     return h('button', {
       type: 'button',
-      class: `color-pick${mine ? ' mine' : ''}${owner && !mine ? ' taken' : ''}`,
+      class: `color-pick${mine ? ' mine' : ''}${person ? ' taken' : ''}${owner?.bot ? ' bot' : ''}`,
       style: { '--pc': P.light ? P.edge : P.color },
-      disabled: !!owner && !mine,
+      disabled: person,
       'aria-pressed': String(!!mine),
-      'aria-label': owner ? (mine ? `${P.name}: your colour` : `${P.name}: taken by ${owner.name}`) : `Play as ${P.name}`,
+      'aria-label': owner ? (mine ? `${P.name}: your colour` : owner.bot ? `Play as ${P.name} (${owner.name} the bot moves to another colour)` : `${P.name}: taken by ${owner.name}`) : `Play as ${P.name}`,
       onClick: () => a.pickColor(c),
     },
       playerMark(P, 30),
@@ -620,7 +621,17 @@ function renderModal(g, a, ui, me, room) {
   } else if (ui.panel === 'history') {
     el = modal('Move history', [h('ol', { class: 'history' }, ...g.log.map((e) => h('li', { text: e.text })))], a);
   }
-  $('modal-root').replaceChildren(...(el ? [el] : []));
+  // Redrawing replaces the dialog, so keep its scroll position when it is the same dialog.
+  const root = $('modal-root');
+  const old = root.firstElementChild;
+  const same = el && old && old.querySelector?.('[role=dialog]')?.getAttribute('aria-label') === el.querySelector?.('[role=dialog]')?.getAttribute('aria-label');
+  const scroll = same ? [old.scrollTop, old.querySelector('.modal')?.scrollTop] : null;
+  root.replaceChildren(...(el ? [el] : []));
+  if (scroll) {
+    el.scrollTop = scroll[0];
+    const box = el.querySelector('.modal');
+    if (box) box.scrollTop = scroll[1];
+  }
   // The header (sound and menu buttons) stays usable while a dialog is open.
   for (const id of ['players', 'bank', 'log', 'right', 'table', 'dock']) $(id).inert = !!el;
 }

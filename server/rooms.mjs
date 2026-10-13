@@ -198,9 +198,19 @@ export function lobby(room, token, msg) {
       break;
     case 'pickColor': {
       if (room.phase !== 'lobby' || !isInt(msg.color, 0, 5)) return false;
-      if (seated(room).some((o) => o !== m && o.color === msg.color)) return false; // taken
+      const holder = seated(room).find((o) => o !== m && o.color === msg.color);
+      if (holder && !holder.bot) return false; // taken by a person
+      if (!holder && m.role !== 'player' && seated(room).length >= 6) return false;
+      const old = m.role === 'player' ? m.color : null;
       m.color = msg.color;
       m.role = 'player';
+      // People choose before bots: a bot on this colour moves to your old one
+      // (or the first free one), and leaves the table if none is left.
+      if (holder) {
+        const next = old ?? freeColors(room)[0];
+        if (next === undefined) room.members.delete(holder.token);
+        else holder.color = next;
+      }
       break;
     }
     case 'remove': {

@@ -203,6 +203,8 @@ h1, h2, h3, p { margin: 0; }
 }
 #board { position: absolute; left: 50%; top: 50%; container-type: inline-size; transform-origin: center; }
 #map-viewport.zoomed { cursor: grab; }
+#map-viewport.moving #board { will-change: transform; }
+#map-viewport.moving .robber, #map-viewport.moving .tile { transition: none; }
 #map-viewport.dragging { cursor: grabbing; user-select: none; }
 .map-controls {
   position: absolute; z-index: 4; bottom: 10px; left: 10px; display: flex; align-items: center; gap: 3px;
@@ -617,3 +619,4 @@ body.busy #board .layer button, body.busy #dock button, body.busy #right button 
   #table { height: calc(100svh - 24px); min-height: 280px; }
   .brand { position: static; }
 }
+.color-pick.bot small { color: #6b4fa0; }

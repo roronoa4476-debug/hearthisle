@@ -15,7 +15,7 @@ const SOUNDS = [
   ['trade', 'Trade', 'A trade with the bank, a harbour or a player goes through.'],
   ['offer', 'Trade offer', 'Another player offers you a trade.'],
   ['robber', 'Robber / seven', 'The robber moves, or a 7 makes players discard.'],
-  ['tick', 'Timer tick', 'Each of the last 5 seconds when the turn timer is waiting on you.'],
+  ['tick', 'Timer tick', 'Each of the last 10 seconds when the turn timer is waiting on you.'],
   ['timeout', 'Out of time', 'The turn timer runs out for someone.'],
   ['win', 'Victory', 'Someone wins the game.'],
 ];
@@ -35,4 +35,5 @@ for (const [name, label, when, detail] of SOUNDS) {
   item.append(button, text);
   list.append(item);
 }
+
 

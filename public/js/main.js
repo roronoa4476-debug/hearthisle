@@ -227,7 +227,7 @@ function paintTimer() {
     el.textContent = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
     el.classList.toggle('urgent', left <= 10);
   }
-  if (left <= 5 && left > 0 && left !== lastTick && timerSeats().includes(mySeat())) sound.play('tick');
+  if (left <= 10 && left > 0 && left !== lastTick && timerSeats().includes(mySeat())) sound.play('tick');
   lastTick = left;
 }
 setInterval(paintTimer, 250);
