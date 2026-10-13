@@ -24,7 +24,7 @@ function client() {
   }
   const location = {protocol:'http:', host:'localhost', search:'?room=BAD1'};
   runInNewContext(source, {
-    R, getGeometry, createMapView:()=>({resize(){}}), console, URLSearchParams, location,
+    R, getGeometry, createMapView:()=>({resize(){}}), createSound:()=>({play(){}, muted:false, setMuted(){}}), soundsFor:()=>[], console, Date, URLSearchParams, location,
     history:{replaceState(_state, _title, url){location.search = new URL(url, 'http://localhost').search;}},
     localStorage:{getItem:k=>storage.get(k)??null, setItem:(k,v)=>storage.set(k,v), removeItem:k=>storage.delete(k), key:i=>[...storage.keys()][i], get length(){return storage.size;}},
     document:{getElementById:id=>{if(!elements.has(id))elements.set(id,element());return elements.get(id);}, addEventListener(){}, body:element()},

@@ -1,6 +1,6 @@
 # Working on this project
 
-Browser board game (Hearthisle) built with plain HTML, CSS and JavaScript modules plus a dependency-free Node server. Run `npm run dev` (port 5174) and `npm test`.
+Browser board game (Koolkatan) built with plain HTML, CSS and JavaScript modules plus a dependency-free Node server. Run `npm run dev` (port 5174) and `npm test`.
 
 - Keep `public/js/rules.js` pure: no DOM, no timers, no `Math.random` without an injectable `rng`. Every action returns a new state, or the same object when the move is not allowed.
 - Keep artwork out of logic. Art files are referenced only in `public/css/art.css`.

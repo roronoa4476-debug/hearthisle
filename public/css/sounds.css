@@ -1,0 +1,10 @@
+/* Sound preview page (/sounds.html). */
+body.sound-page { overflow: auto; padding: 16px; }
+.sound-board { max-width: 620px; margin: 0 auto; padding: 18px 20px 20px; display: flex; flex-direction: column; gap: 10px; }
+.sound-board h1 { font-family: var(--font-display); font-weight: 400; font-size: 26px; }
+#sound-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+#sound-list li { display: grid; grid-template-columns: 170px 1fr; gap: 12px; align-items: center; padding: 8px 10px; border-radius: 10px; background: rgba(255, 250, 236, 0.88); box-shadow: inset 0 0 0 1px rgba(110, 62, 24, 0.25); }
+#sound-list .btn { width: 100%; white-space: nowrap; }
+#sound-list p { font-size: 13.5px; line-height: 1.35; }
+#sound-list small { display: block; font-size: 11.5px; color: var(--ink-soft); }
+@media (max-width: 480px) { #sound-list li { grid-template-columns: 1fr; gap: 6px; } }

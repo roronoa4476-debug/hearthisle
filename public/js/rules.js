@@ -6,7 +6,7 @@ import { getGeometry } from './geometry.js';
 const geo = g => getGeometry(g.playerCount || g.players.length);
 
 export const RES = ['wood', 'brick', 'wheat', 'sheep', 'ore'];
-export const RES_NAME = { wood: 'Wood', brick: 'Brick', wheat: 'Wheat', sheep: 'sheepar', ore: 'Ore' };
+export const RES_NAME = { wood: 'Wood', brick: 'Brick', wheat: 'Wheat', sheep: 'Sheep', ore: 'Ore' };
 export const RES_TERRAIN = { wood: 'forest', brick: 'hills', wheat: 'fields', sheep: 'pasture', ore: 'mountains' };
 export const TERRAIN_RES = { forest: 'wood', hills: 'brick', fields: 'wheat', pasture: 'sheep', mountains: 'ore', desert: null };
 export const TERRAIN_NAME = { forest: 'Forest', hills: 'Hills', fields: 'Fields', pasture: 'Pasture', mountains: 'Mountains', desert: 'Desert' };
@@ -56,6 +56,9 @@ export const TERRAIN_BAG = [
 ];
 export const DEFAULT_NUMBERS = [6, 3, 11, 5, 10, 9, 8, 4, 12, 0, 9, 5, 8, 2, 10, 4, 11, 6, 3];
 export const WIN_POINTS = 10;
+export const WIN_CHOICES = [8, 10, 12]; // 15 can be unreachable: the board and pieces run out first
+// Points needed to win this game (a lobby option; older saves use 10).
+export const winTarget = (g) => g.winPoints || WIN_POINTS;
 const BLOCKING = ['robber', 'steal', 'plenty', 'monopoly', 'discard'];
 
 /* ---------- small helpers ---------- */
@@ -109,7 +112,26 @@ export function hotNumbersSeparated(numbers,count=4) {
   const G=getGeometry(count), hot=n=>n===6||n===8;
   return G.hexes.every(h=>!hot(numbers[h.id])||G.neighbors[h.id].every(n=>!hot(numbers[n])));
 }
-export function newBoard(randomize=true,rng=Math.random,count=4) {
+// Lower is fairer: penalises touching 6/8s, touching equal numbers, clumps of
+// one terrain, and a resource whose total odds are far from the others.
+export function boardImbalance(board,count=4) {
+  const G=getGeometry(count), {terrain,numbers}=board, hot=n=>n===6||n===8;
+  let score=0;
+  for(const h of G.hexes) for(const n of G.neighbors[h.id]) {
+    if(n<h.id) continue;
+    if(hot(numbers[h.id])&&hot(numbers[n])) score+=10;
+    else if(numbers[h.id]&&numbers[h.id]===numbers[n]) score+=3;
+    if(terrain[h.id]===terrain[n]) score+=1;
+  }
+  const odds=RES.map(r=>G.hexes.reduce((s,h)=>s+(TERRAIN_RES[terrain[h.id]]===r?pips(numbers[h.id]):0),0));
+  return score+(Math.max(...odds)-Math.min(...odds))*0.5;
+}
+export function newBoard(randomize=true,rng=Math.random,count=4,balanced=false) {
+  if(balanced && randomize) {
+    let best=null,bestScore=Infinity;
+    for(let i=0;i<60;i++){const b=newBoard(true,rng,count);const sc=boardImbalance(b,count);if(sc<bestScore)[best,bestScore]=[b,sc];}
+    return best;
+  }
   const cfg=configFor(count), G=getGeometry(count);
   if(!randomize && count<=4) return {terrain:TERRAIN_BAG.slice(),numbers:DEFAULT_NUMBERS.slice()};
   const terrain=shuffle(cfg.terrain,rng), numbers=terrain.map(()=>0), letters=terrain.map(()=>null);
@@ -219,8 +241,14 @@ export function validEdges(g) {
   if (g.mode !== 'road') return [];
   return geo(g).edges.filter((e) => canRoad(g, e.id, g.cur)).map((e) => e.id);
 }
+// Friendly robber option: players with 2 or fewer visible points can't be
+// blocked or robbed (unless every tile touches one of them).
+export const protectedSeat = (g, p) => !!g.friendlyRobber && p !== g.cur && victoryPoints(g, p, false) <= 2;
 export function robberTargets(g) {
-  return g.mode === 'robber' ? geo(g).hexes.filter((h) => h.id !== g.robber).map((h) => h.id) : [];
+  if (g.mode !== 'robber') return [];
+  const all = geo(g).hexes.filter((h) => h.id !== g.robber);
+  const safe = g.friendlyRobber ? all.filter((h) => !h.verts.some((v) => g.settlements[v] && protectedSeat(g, g.settlements[v].p))) : all;
+  return (safe.length ? safe : all).map((h) => h.id);
 }
 export function prompt(g) {
   if (g.winner !== null) return `${player(g, g.winner).name} has won the island.`;
@@ -275,10 +303,10 @@ function updateArmy(g) {
   }
 }
 function checkWin(g) {
-  if (g.winner === null && victoryPoints(g, g.cur, true) >= WIN_POINTS) {
+  if (g.winner === null && victoryPoints(g, g.cur, true) >= winTarget(g)) {
     g.winner = g.cur;
     g.mode = null;
-    log(g, `${player(g, g.cur).name} reaches ${WIN_POINTS} points and wins.`);
+    log(g, `${player(g, g.cur).name} reaches ${winTarget(g)} points and wins.`);
   }
 }
 function steal(g, from, rng) {
@@ -308,10 +336,11 @@ function vertexScore(g, vid) {
 }
 
 /* ---------- game creation ---------- */
-export function createGame({ randomize = true, autoSetup = true, rng = Math.random, playerCount=4, chooseFirst=false, firstPlayer=0, seats=null } = {}) {
+export function createGame({ randomize = true, autoSetup = true, rng = Math.random, playerCount=4, chooseFirst=false, firstPlayer=0, seats=null, winPoints=WIN_POINTS, friendlyRobber=false, balanced=false } = {}) {
   if (seats) playerCount = seats.length;
   if (![3,4,5,6].includes(playerCount)) throw new RangeError('Choose 3–6 players');
-  const board = newBoard(randomize, rng, playerCount);
+  if (!WIN_CHOICES.includes(winPoints)) throw new RangeError('Unsupported points target');
+  const board = newBoard(randomize, rng, playerCount, balanced);
   const openingRolls=Array(playerCount).fill(null);
   if(chooseFirst){
     let tied=Array.from({length:playerCount},(_,i)=>i);
@@ -357,6 +386,7 @@ export function createGame({ randomize = true, autoSetup = true, rng = Math.rand
     plentyLeft: 0,
     victims: [],
     trade: { tab: 'bank', give: 'wheat', get: 'ore', giveN: 1, getN: 1 },
+    winPoints, friendlyRobber: !!friendlyRobber,
   };
   if (autoSetup) {
     // Each player takes the best open corner in snake order (a quick-start helper).
@@ -589,7 +619,7 @@ export function placeAtEdge(s, eid) {
 }
 
 export function moveRobber(s, hid, rng = Math.random) {
-  if (s.winner!==null || s.mode !== 'robber' || !geo(s).hexes[hid] || hid === s.robber) return s;
+  if (s.winner!==null || s.mode !== 'robber' || !robberTargets(s).includes(hid)) return s;
   const g = clone(s);
   g.robber = hid;
   const n = g.numbers[hid];
@@ -597,7 +627,7 @@ export function moveRobber(s, hid, rng = Math.random) {
   const victims = [];
   for (const v of geo(g).hexes[hid].verts) {
     const t = g.settlements[v];
-    if (t && t.p !== g.cur && !victims.includes(t.p) && totalCards(g.players[t.p].res) > 0) victims.push(t.p);
+    if (t && t.p !== g.cur && !victims.includes(t.p) && !protectedSeat(g, t.p) && totalCards(g.players[t.p].res) > 0) victims.push(t.p);
   }
   if (victims.length === 0) {
     g.mode = null;
@@ -800,10 +830,19 @@ export function validSavedGame(g){
   if(!Array.isArray(g.deck)||!g.deck.every(c=>DEV_TYPES.includes(c))||!Array.isArray(g.roadList)||!Array.isArray(g.townList)||!Array.isArray(g.roadLens)||g.roadLens.length!==g.playerCount||!Array.isArray(g.log)||!Array.isArray(g.dice)||g.dice.length!==2)return false;
   if(!g.terrain.every(t=>Object.keys(TERRAIN_RES).includes(t))||!g.players.every(p=>validBasket(p.res)&&Array.isArray(p.dev)&&p.dev.every(c=>DEV_TYPES.includes(c.type)&&Number.isInteger(c.turn))))return false;
   if(g.phase==='setup'&&(!g.setup||!Array.isArray(g.setupOrder)))return false;
+  if(g.winPoints!==undefined&&!WIN_CHOICES.includes(g.winPoints))return false;
   return Number.isInteger(g.cur)&&!!g.players[g.cur]&&['setup','roll','main'].includes(g.phase)&&g.roadList.every(e=>!!G.edges[e]&&!!g.players[g.roads[e]])&&g.townList.every(v=>!!G.verts[v]&&!!g.players[g.settlements[v]?.p]);
 }
 
 /* ---------- helpers for online seats ---------- */
+/** The turn timer ran out for these seats; their moves were finished automatically. */
+export function noteTimeout(s, seats) {
+  const g = clone(s);
+  const names = seats.map((p) => player(g, p).name).join(' and ');
+  log(g, `${names} ran out of time.`, seats[0]);
+  toast(g, `${names} ran out of time.`);
+  return g;
+}
 export const vertexValue = (g, vid) => vertexScore(g, vid); // how productive a corner is
 export const hexCorners = (g, hid) => geo(g).hexes[hid]?.verts || [];
 /** A spectator took over an empty seat. */

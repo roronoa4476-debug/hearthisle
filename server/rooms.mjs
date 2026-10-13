@@ -3,6 +3,7 @@
 // person a copy of the game with other players' hands hidden.
 import { randomBytes, randomInt } from 'node:crypto';
 import * as R from '../public/js/rules.js';
+import { botStep, wantsOffer } from './bots.mjs';
 
 export const COLORS = R.PLAYERS.map((p) => p.name); // 6 colours, index = colour id
 const CODE_LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -12,6 +13,21 @@ const RESTORE_HOLD_MS = 8000; // after a restart, wait for everyone's backups be
 const BACKUP_MAX_AGE_MS = 3 * 24 * 60 * 60 * 1000;
 const ROLL_MS = 550;
 const PRODUCE_MS = 2200;
+const BOT_MS = 850; // pause between bot moves so people can follow them
+const BOT_STEPS_PER_TURN = 60; // safety net: a bot that keeps acting ends its turn
+export const TIMER_CHOICES = [0, 60, 90, 120]; // turn timer in seconds (0 = off)
+const BOT_NAMES = ['Maple', 'Clover', 'Basil', 'Fennel', 'Saffron', 'Thistle'];
+export const DEFAULT_OPTIONS = { quick: false, winPoints: R.WIN_POINTS, balanced: false, friendlyRobber: false, turnTimer: 0 };
+/** Accept only known option values; anything else falls back to the default. */
+export function cleanOptions(o = {}, base = DEFAULT_OPTIONS) {
+  return {
+    quick: typeof o.quick === 'boolean' ? o.quick : base.quick,
+    winPoints: R.WIN_CHOICES.includes(o.winPoints) ? o.winPoints : base.winPoints,
+    balanced: typeof o.balanced === 'boolean' ? o.balanced : base.balanced,
+    friendlyRobber: typeof o.friendlyRobber === 'boolean' ? o.friendlyRobber : base.friendlyRobber,
+    turnTimer: TIMER_CHOICES.includes(o.turnTimer) ? o.turnTimer : base.turnTimer,
+  };
+}
 
 const rooms = new Map();
 const secureRandom = () => randomInt(0, 2 ** 32) / 2 ** 32;
@@ -39,7 +55,7 @@ export function createRoom({ force = false } = {}) {
     members: new Map(), // token -> member
     hostToken: null,
     phase: 'lobby',
-    options: { quick: false },
+    options: { ...DEFAULT_OPTIONS },
     game: null,
     seatTokens: [], // game seat index -> member token
     touched: Date.now(),
@@ -76,6 +92,20 @@ export function join(room, token, name) {
 }
 
 export const seated = (room) => [...room.members.values()].filter((m) => m.role === 'player');
+const isBotToken = (room, t) => t !== null && !!room.members.get(t)?.bot;
+export const isBotSeat = (room, p) => isBotToken(room, room.seatTokens[p]);
+
+/** Host adds a computer player on the first free colour. */
+export function addBot(room) {
+  const free = freeColors(room);
+  if (room.phase !== 'lobby' || !free.length || seated(room).length >= 6 || room.members.size >= MAX_MEMBERS) return null;
+  const used = new Set([...room.members.values()].map((m) => m.name));
+  const name = BOT_NAMES.find((n) => !used.has(n)) || `${BOT_NAMES[0]} ${room.members.size}`;
+  const token = `bot-${randomBytes(12).toString('hex')}`;
+  const m = { token, id: randomBytes(6).toString('hex'), name, color: free[0], role: 'player', connected: 0, joined: Date.now(), bot: true };
+  room.members.set(token, m);
+  return m;
+}
 export const freeColors = (room) => COLORS.map((_, i) => i).filter((c) => !seated(room).some((m) => m.color === c));
 export const seatOf = (room, token) => (room.game ? room.seatTokens.indexOf(token) : -1);
 
@@ -115,19 +145,28 @@ function startPractice(room, token) {
   stockPractice(room);
 }
 
+function stopTimers(room) {
+  Object.values(room.timers).forEach(clearTimeout);
+  room.timers = {};
+  room.timerKey = null;
+  room.deadline = null;
+}
+
 function changed(room, meaningful = true) {
   room.touched = Date.now();
   if (meaningful) {
     room.version++;
     room.playedSinceRestore = true;
   }
+  scheduleTurnTimer(room);
+  scheduleBots(room);
   for (const fn of room.listeners) fn(room);
 }
 
 /** After a restart, hold moves until every seated player is back or a few seconds pass. */
 export function holding(room) {
   if (!room.holdUntil) return false;
-  const everyoneBack = room.seatTokens.every((t) => t === null || room.members.get(t)?.connected > 0);
+  const everyoneBack = room.seatTokens.every((t) => t === null || isBotToken(room, t) || room.members.get(t)?.connected > 0);
   if (everyoneBack || Date.now() >= room.holdUntil) {
     room.holdUntil = 0;
     return false;
@@ -147,7 +186,7 @@ export function lobby(room, token, msg) {
       break;
     case 'practiceReset':
       if (!room.practice || !isHost) return false;
-      Object.values(room.timers).forEach(clearTimeout);
+      stopTimers(room);
       startPractice(room, token);
       break;
     case 'setName':
@@ -168,6 +207,11 @@ export function lobby(room, token, msg) {
       if (!isHost) return false;
       const target = [...room.members.values()].find((x) => x.id === msg.id);
       if (!target || target.token === room.hostToken) return false;
+      if (target.bot && room.phase !== 'lobby') return false; // a bot keeps its seat for the whole game
+      if (target.bot) {
+        room.members.delete(target.token);
+        break;
+      }
       const seat = seatOf(room, target.token);
       if (seat >= 0) room.seatTokens[seat] = null; // the seat stays in the game, played by autopilot
       room.members.delete(target.token);
@@ -195,26 +239,31 @@ export function lobby(room, token, msg) {
       break;
     case 'setOption':
       if (!isHost || room.phase !== 'lobby') return false;
-      room.options.quick = !!msg.quick;
+      room.options = cleanOptions(msg, room.options);
+      break;
+    case 'addBot':
+      if (!isHost || !addBot(room)) return false;
       break;
     case 'start': {
       if (!isHost || room.phase !== 'lobby') return false;
       const players = seated(room).sort((a, b) => a.color - b.color);
       if (players.length < 3 || players.length > 6) return false;
-      room.seatTokens = players.map((p) => p.token);
-      room.game = R.createGame({
-        seats: players.map((p) => ({ name: p.name, color: p.color })),
-        autoSetup: room.options.quick,
-        chooseFirst: true,
-        rng: secureRandom,
-      });
-      room.phase = 'game';
+      startGame(room, players);
+      break;
+    }
+    case 'rematch': {
+      // Same people, bots, colours and options on a fresh island.
+      if (room.practice || !isHost || room.phase !== 'game' || room.game?.winner === null) return false;
+      const players = room.seatTokens.map((t) => room.members.get(t)).filter((m) => m && m.role === 'player');
+      if (players.length < 3) return false;
+      stopTimers(room);
+      startGame(room, players);
       break;
     }
     case 'backToLobby':
       if (room.practice) return false;
       if (!isHost || room.phase !== 'game' || (room.game && room.game.winner === null && !msg.force)) return false;
-      Object.values(room.timers).forEach(clearTimeout);
+      stopTimers(room);
       room.phase = 'lobby';
       room.game = null;
       room.seatTokens = [];
@@ -224,6 +273,23 @@ export function lobby(room, token, msg) {
   }
   changed(room);
   return true;
+}
+
+function startGame(room, players) {
+  const o = room.options;
+  room.seatTokens = players.map((p) => p.token);
+  room.game = R.createGame({
+    seats: players.map((p) => ({ name: p.name, color: p.color })),
+    autoSetup: o.quick,
+    chooseFirst: true,
+    rng: secureRandom,
+    winPoints: o.winPoints,
+    friendlyRobber: o.friendlyRobber,
+    balanced: o.balanced,
+  });
+  room.phase = 'game';
+  room.botSteps = null;
+  room.timerKey = null;
 }
 
 /* ---------- game actions ---------- */
@@ -286,20 +352,28 @@ export function act(room, token, name, args = []) {
 }
 
 /* ---------- autopilot for seats whose player was removed ---------- */
-const vacant = (room, p) => room.seatTokens[p] === null;
 const pipScore = (g, vid) => R.vertexValue(g, vid);
+// Setup placements and turns each get their own key, used by the turn timer.
+const turnKey = (g) => (g.phase === 'setup' ? `s${g.setup.step}` : `t${g.turn}`);
 
-/** Play the simplest legal move for empty seats until a real person has to act. */
-export function autopilot(room) {
+/**
+ * Play the simplest legal move for empty seats until a real person has to act.
+ * `forced` seats (whose turn timer ran out) are played the same way until their turn ends.
+ */
+export function autopilot(room, forced = new Set()) {
+  const startKey = room.game && turnKey(room.game);
+  const discardOnly = room.game?.mode === 'discard'; // a late discard doesn't cost the rest of the turn
+  const vacant = (p) => room.seatTokens[p] === null || forced.has(p);
   for (let guard = 0; guard < 80; guard++) {
     const g = room.game;
     if (!g || room.phase !== 'game' || g.winner !== null || g.rolling) return;
+    if (forced.size && (turnKey(g) !== startKey || (discardOnly && g.mode !== 'discard'))) forced = new Set();
     let next = g;
     if (g.mode === 'discard') {
-      const d = g.discards.find((x) => vacant(room, x.p));
+      const d = g.discards.find((x) => vacant(x.p));
       if (!d) return; // waiting for real people to discard
       next = R.discardCards(g, randomCards(g.players[d.p].res, d.n), d.p);
-    } else if (!vacant(room, g.cur)) {
+    } else if (!vacant(g.cur)) {
       return;
     } else if (g.offer) {
       next = R.withdrawTrade(g);
@@ -334,6 +408,105 @@ export function autopilot(room) {
     if (next === g) return; // nothing legal to do; never loop forever
     room.game = next;
   }
+}
+
+/* ---------- bots ---------- */
+/** Whether a bot has something to do right now. */
+function botPending(room) {
+  const g = room.game;
+  if (!g || room.phase !== 'game' || g.winner !== null || g.rolling || holding(room)) return false;
+  if (g.mode === 'discard') return g.discards.some((d) => isBotSeat(room, d.p));
+  if (g.offer && !g.paired) return g.players.some((_, q) => q !== g.cur && isBotSeat(room, q) && g.offer.responses[q] === undefined);
+  return isBotSeat(room, g.cur);
+}
+
+/**
+ * One bot move. Returns true when the game changed (the caller then
+ * broadcasts). With `instant`, dice resolve at once instead of animating.
+ */
+export function botTick(room, { instant = false } = {}) {
+  if (!botPending(room)) return false;
+  const g = room.game;
+  let next = g;
+  if (g.mode === 'discard') {
+    next = botStep(g, g.discards.find((d) => isBotSeat(room, d.p)).p, secureRandom);
+  } else if (g.offer && !isBotSeat(room, g.cur)) {
+    const q = g.players.findIndex((_, i) => i !== g.cur && isBotSeat(room, i) && g.offer.responses[i] === undefined);
+    next = R.respondTrade(g, q, wantsOffer(g, q));
+  } else {
+    const key = turnKey(g);
+    if (room.botSteps?.key !== key) room.botSteps = { key, n: 0 };
+    if (++room.botSteps.n > BOT_STEPS_PER_TURN && g.phase === 'main' && !R.isBlocking(g)) next = R.endTurn(R.cancelBuild(g));
+    else next = botStep(g, g.cur, secureRandom);
+    if (next === g && g.phase === 'roll' && !g.mode) {
+      if (!instant) return roll(room) ? 'rolling' : false; // roll() broadcasts by itself
+      next = R.resolveRoll(R.startRoll(g, secureRandom), R.rollDice(secureRandom), secureRandom);
+    }
+    if (next === g && g.phase === 'main') next = R.endTurn(R.cancelBuild(g)); // stuck: never stall the table
+  }
+  if (next === g) return false;
+  room.game = next;
+  autopilot(room);
+  return true;
+}
+
+// Bots only play while at least one person is connected, so an abandoned
+// bot table goes quiet and is eventually swept like any idle room.
+const someoneConnected = (room) => [...room.members.values()].some((m) => !m.bot && m.connected > 0);
+
+function scheduleBots(room) {
+  if (room.timers.bot || !botPending(room) || !someoneConnected(room)) return;
+  room.timers.bot = setTimeout(() => {
+    room.timers.bot = null;
+    try {
+      if (botTick(room) === true) changed(room);
+    } catch (err) {
+      console.error('bot move failed', err);
+    }
+  }, BOT_MS);
+  room.timers.bot.unref?.();
+}
+
+/* ---------- turn timer ---------- */
+/** People (not bots) who must act before the game can go on. */
+function waitingOn(room) {
+  const g = room.game;
+  if (!g || room.phase !== 'game' || g.winner !== null) return [];
+  const people = g.mode === 'discard' ? g.discards.map((d) => d.p) : [g.cur];
+  return people.filter((p) => room.seatTokens[p] !== null && !isBotSeat(room, p));
+}
+
+function scheduleTurnTimer(room) {
+  const seconds = room.options.turnTimer;
+  const people = waitingOn(room);
+  const key = seconds && people.length ? `${turnKey(room.game)}|${room.game.mode === 'discard' ? 'd' : ''}` : null;
+  if (!key) room.deadline = null;
+  if (key === room.timerKey) return;
+  room.timerKey = key;
+  clearTimeout(room.timers.turn);
+  room.deadline = key ? Date.now() + seconds * 1000 : null;
+  if (!key) return;
+  room.timers.turn = setTimeout(() => {
+    if (room.timerKey !== key) return;
+    try {
+      if (expireTurn(room)) changed(room);
+      else { room.timerKey = null; room.deadline = null; } // mid-roll or restoring: restart the clock on the next update
+    } catch (err) {
+      console.error('turn timer failed', err);
+    }
+  }, seconds * 1000 + 250);
+  room.timers.turn.unref?.();
+}
+
+/** Time ran out: finish the late players' moves the way autopilot would. */
+export function expireTurn(room) {
+  const g = room.game;
+  const late = waitingOn(room);
+  if (!g || !late.length || g.rolling || holding(room)) return false;
+  autopilot(room, new Set(late));
+  if (room.game === g) return false;
+  room.game = R.noteTimeout(room.game, late);
+  return true;
 }
 
 function randomCards(res, n) {
@@ -395,11 +568,12 @@ export function viewFor(room, token) {
       practice: !!room.practice,
       version: room.version,
       restoring: holding(room),
+      deadlineIn: room.deadline ? Math.max(0, room.deadline - Date.now()) : null,
       vacant: room.seatTokens.flatMap((t, i) => (t === null ? [i] : [])),
       you: me ? { id: me.id, name: me.name, color: me.color, role: me.role, seat, host: room.hostToken === token } : null,
       members: [...room.members.values()]
         .sort((a, b) => a.joined - b.joined)
-        .map((m) => ({ id: m.id, name: m.name, color: m.color, role: m.role, connected: m.connected > 0, host: room.hostToken === m.token, seat: seatOf(room, m.token) })),
+        .map((m) => ({ id: m.id, name: m.name, color: m.color, role: m.role, connected: m.bot || m.connected > 0, bot: !!m.bot, host: room.hostToken === m.token, seat: seatOf(room, m.token) })),
     },
     game,
   };
@@ -420,7 +594,7 @@ export function sweep(maxIdleMs = 6 * 60 * 60 * 1000) {
   for (const [code, room] of rooms) {
     const someoneHere = [...room.members.values()].some((m) => m.connected > 0);
     if (!someoneHere && now - room.touched > maxIdleMs) {
-      Object.values(room.timers).forEach(clearTimeout);
+      stopTimers(room);
       rooms.delete(code);
     }
   }
@@ -440,7 +614,7 @@ export function snapshotOf(room) {
     game: room.game ? { ...room.game, toast: null } : null,
     seatTokens: room.seatTokens,
     removed: [...(room.removed || [])],
-    members: [...room.members.values()].map(({ token, id, name, color, role, joined }) => ({ token, id, name, color, role, joined })),
+    members: [...room.members.values()].map(({ token, id, name, color, role, joined, bot }) => ({ token, id, name, color, role, joined, ...(bot ? { bot: true } : {}) })),
   };
 }
 
@@ -457,12 +631,13 @@ export function restoreRoom(data) {
   const room = existing || createRoomWithCode(data.code);
   room.hostToken = data.hostToken;
   room.phase = data.phase === 'game' && data.game ? 'game' : 'lobby';
-  room.options = { quick: !!data.options?.quick };
+  room.options = cleanOptions(data.options || {});
   room.practice = data.practice === true;
   room.game = room.phase === 'game' ? data.game : null;
   room.seatTokens = Array.isArray(data.seatTokens) ? data.seatTokens.map((t) => (typeof t === 'string' ? t : null)) : [];
   room.removed = new Set(Array.isArray(data.removed) ? data.removed : []);
-  room.members = new Map(data.members.map((m) => [m.token, { ...m, connected: live.get(m.token)?.connected || 0 }]));
+  room.members = new Map(data.members.map((m) => [m.token, { ...m, bot: m.bot === true && String(m.token).startsWith('bot-'), connected: live.get(m.token)?.connected || 0 }]));
+  room.timerKey = null;
   room.version = data.version;
   room.restoredFrom = data.version;
   room.playedSinceRestore = false;

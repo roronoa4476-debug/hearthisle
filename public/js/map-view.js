@@ -33,6 +33,8 @@ export function createMapView({ table, frame, viewport, board, zoomIn, zoomOut, 
   let size = { width: 1, height: 1, boardWidth: 1, boardHeight: 1 };
   let currentKey;
   let drag = null;
+  const touches = new Map(); // pointerId -> {x, y}, for two-finger pinch zoom
+  let pinch = null;
 
   function paint() {
     board.style.transform = `translate(-50%, -50%) translate(${view.x}px, ${view.y}px) scale(${view.zoom})`;
@@ -72,19 +74,41 @@ export function createMapView({ table, frame, viewport, board, zoomIn, zoomOut, 
     } else return;
     event.preventDefault();
   });
+  const center = (rect, a, b) => ({ x: (a.x + b.x) / 2 - rect.left - rect.width / 2, y: (a.y + b.y) / 2 - rect.top - rect.height / 2 });
   viewport.addEventListener('pointerdown', (event) => {
+    if (event.pointerType === 'touch') {
+      // A first finger starts fresh: forget touches whose lift never reached the map.
+      if (event.isPrimary) { touches.clear(); pinch = null; }
+      touches.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      if (touches.size === 2) {
+        const [a, b] = [...touches.values()];
+        pinch = { dist: Math.hypot(a.x - b.x, a.y - b.y) || 1, zoom: view.zoom };
+        if (drag && viewport.hasPointerCapture(drag.id)) viewport.releasePointerCapture(drag.id);
+        drag = null; // two fingers zoom instead of dragging
+        viewport.classList.remove('dragging');
+        return;
+      }
+    }
     // Placement targets retain their normal click/touch behavior.
     if (drag || view.zoom <= MIN_ZOOM || event.button !== 0 || event.target.closest('button')) return;
     drag = { id: event.pointerId, startX: event.clientX, startY: event.clientY, x: view.x, y: view.y };
     viewport.setPointerCapture(event.pointerId);
   });
   viewport.addEventListener('pointermove', (event) => {
+    if (touches.has(event.pointerId)) touches.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (pinch && touches.size === 2) {
+      const [a, b] = [...touches.values()];
+      zoomTo(pinch.zoom * (Math.hypot(a.x - b.x, a.y - b.y) / pinch.dist), center(viewport.getBoundingClientRect(), a, b));
+      return;
+    }
     if (!drag || event.pointerId !== drag.id) return;
     view = clampView({ ...view, x: drag.x + event.clientX - drag.startX, y: drag.y + event.clientY - drag.startY }, size);
     viewport.classList.add('dragging');
     paint();
   });
   function endDrag(event) {
+    touches.delete(event.pointerId);
+    if (touches.size < 2) pinch = null;
     if (!drag || event.pointerId !== drag.id) return;
     drag = null;
     viewport.classList.remove('dragging');

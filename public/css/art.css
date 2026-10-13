@@ -27,3 +27,5 @@
 .i-monopoly { background-image: url('../art/icons/monopoly-emblem.png'); }
 .i-vp { background-image: url('../art/icons/vp-emblem.png'); }
 .i-dev-back { background-image: url('../art/icons/dev-back-emblem.png'); }
+.i-sound { background-image: url('../art/icons/sound-on.svg'); }
+.sound.off .i-sound { background-image: url('../art/icons/sound-off.svg'); }

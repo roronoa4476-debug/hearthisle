@@ -4,6 +4,7 @@ import * as R from './rules.js';
 import { getGeometry } from './geometry.js';
 import { render } from './view.js';
 import { createMapView } from './map-view.js';
+import { createSound, soundsFor } from './sound.js';
 
 const store = {
   get(key) { try { return localStorage.getItem(key); } catch { return null; } },
@@ -28,6 +29,8 @@ let game = null;
 let ws = null;
 let retry = 0;
 let practiceRequest = false;
+let soloRequest = false;
+let reconnected = false; // the first update after a dropped connection shouldn't replay missed sounds
 const savedName = (store.get('hearthisle-name') || '').trim();
 // Opening an invite link asks for your name first (unless this browser already knows it).
 let wantConnection = !!roomCode && !!savedName;
@@ -45,7 +48,9 @@ const ui = {
   discard: R.emptyRes(),
   counter: null,
   toastHidden: null,
+  deadline: null, // local time when the current turn timer runs out
 };
+const sound = createSound({ muted: store.get('hearthisle-muted') === '1' });
 const timers = {};
 
 /* ---------- drawing ---------- */
@@ -68,6 +73,7 @@ function draw() {
   if (g.toast && g.toast.id === ui.toastHidden) g = { ...g, toast: null };
   render(g, actions, ui, room);
   fitBoard();
+  paintTimer?.();
 }
 new ResizeObserver(fitBoard).observe(document.getElementById('table'));
 
@@ -84,7 +90,7 @@ function connect() {
   socket.addEventListener('open', () => {
     if (socket !== ws) return;
     const snapshot = roomCode ? store.get(`hearthisle-snap-${roomCode}`) : null;
-    socket.send(JSON.stringify({ type: 'hello', room: roomCode, token, name: (ui.nameDraft || '').trim() || undefined, practice: practiceRequest && !roomCode, snapshot: snapshot || undefined }));
+    socket.send(JSON.stringify({ type: 'hello', room: roomCode, token, name: (ui.nameDraft || '').trim() || undefined, practice: practiceRequest && !roomCode, solo: soloRequest && !roomCode, snapshot: snapshot || undefined }));
   });
   socket.addEventListener('message', (event) => {
     if (socket !== ws) return;
@@ -99,6 +105,8 @@ function connect() {
     try { msg = JSON.parse(event.data); } catch { return; }
     if (msg.type === 'error') {
       ui.error = msg.message;
+      practiceRequest = false;
+      soloRequest = false;
       // A rejected join needs a new choice from the player, not a retry loop.
       wantConnection = false;
       clearTimeout(timers.retry);
@@ -120,9 +128,17 @@ function connect() {
     setBusy(false);
     const hadOffer = !!game?.offer;
     const oldToast = game?.toast?.id;
+    const before = game;
     room = msg.room;
     practiceRequest = false;
+    soloRequest = false;
     game = msg.game;
+    ui.deadline = Number.isFinite(room.deadlineIn) ? Date.now() + room.deadlineIn : null;
+    const sameGame = before && game && room.code === before.roomCode && game.serial >= before.serial && game.terrain.join() === before.terrain.join();
+    if (sameGame && !reconnected) for (const name of soundsFor(before, game, mySeat())) sound.play(name, name === 'gain' ? R.totalCards(game.gains[mySeat()]) : undefined);
+    else if (game && !sameGame && game.cur === mySeat() && game.winner === null) sound.play('turn'); // a new game where you go first
+    reconnected = false;
+    if (game) game.roomCode = room.code;
     ui.status = 'online';
     ui.error = '';
     roomCode = room.code;
@@ -143,6 +159,7 @@ function connect() {
   };
   socket.addEventListener('close', () => {
     if (socket !== ws || !wantConnection) return;
+    reconnected = true;
     ui.status = 'connecting';
     showNotice('Connection lost — reconnecting…');
     clearTimeout(timers.retry);
@@ -189,6 +206,32 @@ function saveBackup(code, snapshot, version) {
   store.set(`hearthisle-snapv-${code}`, String(version ?? 0));
 }
 
+const mySeat = () => (room?.you && room.you.seat >= 0 ? room.you.seat : null);
+
+/* ---------- turn timer ---------- */
+// Seats the timer is waiting on (the player whose turn it is, or everyone discarding).
+function timerSeats() {
+  if (!game || game.winner !== null) return [];
+  return game.mode === 'discard' ? game.discards.map((d) => d.p) : [game.cur];
+}
+let lastTick = null;
+function paintTimer() {
+  const el = document.getElementById('turn-timer');
+  if (!ui.deadline || !game) {
+    if (el) el.hidden = true;
+    return;
+  }
+  const left = Math.max(0, Math.ceil((ui.deadline - Date.now()) / 1000));
+  if (el) {
+    el.hidden = false;
+    el.textContent = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
+    el.classList.toggle('urgent', left <= 10);
+  }
+  if (left <= 5 && left > 0 && left !== lastTick && timerSeats().includes(mySeat())) sound.play('tick');
+  lastTick = left;
+}
+setInterval(paintTimer, 250);
+
 /* ---------- actions ---------- */
 const actions = {
   ui(patch) {
@@ -200,7 +243,18 @@ const actions = {
     Object.assign(ui, patch);
     draw();
   },
+  playSolo() {
+    if (ui.nameDraft.trim().toLowerCase() === '/test') return actions.createRoom();
+    soloRequest = true;
+    practiceRequest = false;
+    store.set('hearthisle-name', ui.nameDraft.trim());
+    roomCode = null;
+    ui.inviteCode = null;
+    ui.error = '';
+    connect();
+  },
   createRoom() {
+    soloRequest = false;
     practiceRequest = ui.nameDraft.trim().toLowerCase() === '/test';
     if (practiceRequest) ui.nameDraft = (store.get('hearthisle-name') || '').trim() || 'Tester';
     store.set('hearthisle-name', ui.nameDraft.trim());
@@ -212,6 +266,7 @@ const actions = {
   joinRoom() {
     if (ui.nameDraft.trim().toLowerCase() === '/test') return actions.createRoom();
     store.set('hearthisle-name', ui.nameDraft.trim());
+    soloRequest = false;
     roomCode = ui.inviteCode || ui.codeDraft.trim().toUpperCase();
     ui.inviteCode = null;
     ui.error = '';
@@ -262,7 +317,16 @@ const actions = {
   },
   spectate: () => send({ type: 'spectate' }),
   setQuick: (quick) => send({ type: 'setOption', quick }),
+  setOption: (patch) => send({ type: 'setOption', ...patch }),
+  addBot: () => send({ type: 'addBot' }),
   start: () => send({ type: 'start' }),
+  rematch: () => send({ type: 'rematch' }),
+  toggleSound() {
+    sound.setMuted(!sound.muted);
+    store.set('hearthisle-muted', sound.muted ? '1' : '0');
+    paintSoundButton();
+    if (!sound.muted) sound.play('turn');
+  },
   practiceRefill: () => send({ type: 'practiceRefill' }),
   practiceReset: () => { ui.panel = null; send({ type: 'practiceReset' }); },
   backToLobby: (force) => {
@@ -295,6 +359,17 @@ const actions = {
     draw();
   },
 };
+
+function paintSoundButton() {
+  const b = document.getElementById('sound');
+  if (!b) return;
+  b.setAttribute?.('aria-pressed', String(!sound.muted));
+  b.setAttribute?.('aria-label', sound.muted ? 'Turn sound on' : 'Turn sound off');
+  b.setAttribute?.('title', sound.muted ? 'Sound is off' : 'Sound is on');
+  b.classList.toggle('off', sound.muted);
+}
+document.getElementById('sound')?.addEventListener('click', actions.toggleSound);
+paintSoundButton();
 
 document.getElementById('menu').addEventListener('click', () => {
   if (room?.phase === 'game') actions.ui({ panel: ui.panel === 'menu' ? null : 'menu' });

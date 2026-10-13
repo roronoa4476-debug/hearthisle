@@ -158,6 +158,8 @@ function attachRooms(server) {
             : { type: 'error', message: 'The server is busy right now. Try again in a minute.' });
         }
         const member = Rooms.join(room, token, msg.name);
+        // "Play solo": a fresh room with three bots already seated.
+        if (member && msg.solo === true && !msg.room && !practice && room.members.size === 1) for (let i = 0; i < 3; i++) Rooms.addBot(room);
         if (!member) {
           const removed = room.removed?.has(token);
           room = null;
