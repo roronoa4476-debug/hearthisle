@@ -7,6 +7,7 @@ import { createMapView } from './map-view.js';
 import { createSound } from './sound.js';
 import { createEffects, freshEvents, shownPoints } from './effects.js';
 import { reattach } from './fx.js';
+import { predict } from './predict.js';
 
 const store = {
   get(key) { try { return localStorage.getItem(key); } catch { return null; } },
@@ -33,7 +34,21 @@ let retry = 0;
 let practiceRequest = false;
 let soloRequest = false;
 let syncNext = true; // the first update after (re)connecting is old news: no animations or sounds
-let eventsSeen = 0;
+let eventsSeen = 0; // newest event id the server has shown us
+let serverGame = null; // the last table the server sent (a predicted move may be shown on top)
+const predicted = []; // events already animated for predicted moves: { sig, at }
+const signature = ({ id, ...rest }) => JSON.stringify(rest);
+/** Drop events whose animation already played when the move was predicted (each match once). */
+function unplayed(events) {
+  const now = Date.now();
+  for (let i = predicted.length - 1; i >= 0; i--) if (now - predicted[i].at > 5000) predicted.splice(i, 1);
+  return events.filter((e) => {
+    const i = predicted.findIndex((p) => p.sig === signature(e));
+    if (i < 0) return true;
+    predicted.splice(i, 1);
+    return false;
+  });
+}
 const savedName = (store.get('hearthisle-name') || '').trim();
 // Opening an invite link asks for your name first (unless this browser already knows it).
 let wantConnection = !!roomCode && !!savedName;
@@ -142,14 +157,18 @@ function connect() {
     setBusy(false);
     const hadOffer = !!game?.offer;
     const oldToast = game?.toast?.id;
-    const before = game;
+    const before = game; // what the screen showed (maybe a predicted move)
+    const serverBefore = serverGame;
     room = msg.room;
     practiceRequest = false;
     soloRequest = false;
     game = msg.game;
+    serverGame = msg.game;
     ui.deadline = Number.isFinite(room.deadlineIn) ? Date.now() + room.deadlineIn : null;
-    const fresh = freshEvents(before, game, eventsSeen, { sync: syncNext });
+    const fresh = freshEvents(serverBefore, game, eventsSeen, { sync: syncNext });
     eventsSeen = fresh.seen;
+    if (syncNext || msg.refused) predicted.length = 0; // a refused move: its guessed animations are void
+    const toPlay = unplayed(fresh.play);
     const points = before && game && !syncNext && before.id === game.id ? [shownPoints(before, mySeat()), shownPoints(game, mySeat())] : null;
     syncNext = false;
     ui.status = 'online';
@@ -170,7 +189,7 @@ function connect() {
     }
     draw();
     // after drawing, so animations land on the updated table
-    effects.play(fresh.play);
+    effects.play(toPlay);
     if (points) effects.points(...points);
   };
   socket.addEventListener('close', () => {
@@ -203,6 +222,19 @@ function sendAction(name, args) {
   if (document.body.classList.contains('busy')) return;
   setBusy(true);
   send({ type: 'action', name, args });
+  // show your own move at once when its result is certain; the server's update follows
+  const guess = predict(game, mySeat(), name, args);
+  if (guess) showPredicted(guess);
+}
+function showPredicted(guess) {
+  const before = game;
+  const newest = Math.max(0, ...(before.events || []).map((e) => e.id));
+  const events = (guess.events || []).filter((e) => e.id > newest);
+  game = guess;
+  predicted.push(...events.map((e) => ({ sig: signature(e), at: Date.now() })));
+  draw();
+  effects.play(events);
+  effects.points(shownPoints(before, mySeat()), shownPoints(game, mySeat()));
 }
 const act = (name) => (...args) => sendAction(name, args);
 

@@ -42,7 +42,7 @@ export function createEffects({ sound, seat, game }) {
   const queue = [];
   let running = false;
   // how well the animations keep up with the game (for checking in a browser: koolkatanFx())
-  const stats = { played: {}, waitedMax: 0, queueMax: 0 };
+  const stats = { played: {}, waitedMax: 0, queueMax: 0, recent: [] };
 
   /* where things are on screen */
   const at = {
@@ -231,6 +231,7 @@ export function createEffects({ sound, seat, game }) {
     while (queue.length) {
       const e = queue.shift();
       stats.played[e.type] = (stats.played[e.type] || 0) + 1;
+      stats.recent = [...stats.recent.slice(-299), `${e.id}:${e.type}`];
       stats.waitedMax = Math.max(stats.waitedMax, performance.now() - e.queuedAt);
       try {
         await handlers[e.type]?.(e);

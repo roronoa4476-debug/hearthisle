@@ -9,3 +9,4 @@ Browser board game (Koolkatan) built with plain HTML, CSS and JavaScript modules
 - Animations and sounds come from game events (`emit()` in `public/js/rules.js`, played by `public/js/effects.js`), not from guessing at state changes. The two exceptions are display-only: the points-coin pop (it includes your own hidden points) and the turn-timer tick. Anything private in an event (a drawn development card, a stolen resource) must be hidden per seat in `eventsFor()` in `server/rooms.mjs`.
 - Use original names and art only. Do not add trademarked game names or copied artwork.
 - Add or update tests in `test/` when changing rules.
+- `public/js/predict.js` shows a player's own certain moves before the server confirms them. Only predict moves that depend on nothing hidden, and keep it matching `act()` in `server/rooms.mjs`; `test/predict.test.mjs` checks the two agree.

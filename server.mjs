@@ -3,7 +3,7 @@
 // on the port the host provides.
 
 import { createServer } from 'node:http';
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { dirname, extname, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
@@ -63,11 +63,20 @@ export function createApp() {
       return;
     }
     try {
-      const body = await readFile(file);
-      res.writeHead(200, {
+      const info = await stat(file);
+      // Artwork rarely changes, so browsers keep it for a week. Code and pages are
+      // re-checked on every visit, but an unchanged file costs only a tiny 304 reply.
+      const headers = {
         'Content-Type': TYPES[extname(file)] || 'application/octet-stream',
-        'Cache-Control': 'no-cache',
-      });
+        'Cache-Control': pathname.startsWith('/art/') ? 'public, max-age=604800' : 'no-cache',
+        ETag: `W/"${info.size}-${Math.round(info.mtimeMs)}"`,
+      };
+      if (req.headers['if-none-match'] === headers.ETag) {
+        res.writeHead(304, headers).end();
+        return;
+      }
+      const body = await readFile(file);
+      res.writeHead(200, headers);
       res.end(req.method === 'HEAD' ? undefined : body);
     } catch {
       res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }).end('Not found');
@@ -180,7 +189,10 @@ function attachRooms(server) {
         if (key === lastAction && Date.now() - lastActionAt < 400) return;
         lastAction = key;
         lastActionAt = Date.now();
-        Rooms.act(room, token, String(msg.name), Array.isArray(msg.args) ? msg.args : []);
+        const accepted = Rooms.act(room, token, String(msg.name), Array.isArray(msg.args) ? msg.args : []);
+        // the browser may already show the move (it predicts certain moves); if it was
+        // refused, send this player the real table so their screen snaps back
+        if (!accepted) send(ws, { ...Rooms.viewFor(room, token), refused: true });
       } else {
         Rooms.lobby(room, token, msg);
       }

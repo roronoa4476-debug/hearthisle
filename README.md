@@ -24,6 +24,7 @@ Settle an island, roll for resources, trade with each other and the bank, build 
 - **Game options:** the host picks points to win (8, 10 or 12), a random or balanced map (no touching 6s and 8s, terrain and odds spread out), the friendly robber (it can't target players with 2 points or fewer), and a turn timer (off, 1, 1½ or 2 minutes). When the timer runs out, that turn is finished automatically.
 - **Rematch:** after a win, the host starts a new island with the same players, bots and options in one click.
 - **Animations:** every card that changes hands is shown moving: production from the tiles, building costs to the bank, bank and player trades, discards on a 7, steals, Monopoly and Year of Plenty, plus bought and played development cards. Your own draws and steals flip to show the card; everyone else only sees a face-down card, so nothing private leaks. Turn banners, award hand-overs, point pops and winner confetti round it off. All flat and short, and switched off for people who prefer reduced motion.
+- **Instant moves:** your own moves whose result is certain (building, bank trades, ending your turn, discarding, Year of Plenty picks) appear at once instead of waiting for the server, which then confirms them. Dice, card draws, steals, Monopoly and player trades still wait for the server, because only it knows the hidden cards.
 - **Sound effects:** dice, building, harvests, trades, the robber, your turn, the last seconds of the timer and the win. Generated in the browser (no sound files); the speaker button mutes them.
 - **Phones:** on a narrow screen the table becomes one scrolling column, with pinch-to-zoom on the map and bigger tap targets.
 - **Online rooms:** create a room, send the link, and everyone plays from their own computer or phone. Each player picks one of six colours (a colour can't be taken twice), or joins as a spectator. Refreshing the page puts you back in your seat.
@@ -50,7 +51,7 @@ The game runs as one small Node server, which fits [Render's free plan](https://
 2. Choose **New → Blueprint** and pick this repository. Render reads `render.yaml` and sets everything up.
 3. When it's live, share the public address shown by Render. This project's game is at [koolkatan.onrender.com](https://koolkatan.onrender.com/).
 
-Free-plan notes: the server sleeps after 15 minutes with nobody connected, so the first person to open the link may wait up to a minute while it wakes. It stays awake while a game is being played.
+Free-plan notes: the server sleeps after 15 minutes with nobody connected, so the first person to open the link may wait up to a minute while it wakes. It stays awake while a game is being played, and a free scheduled GitHub job (`.github/workflows/keep-awake.yml`) visits it every 10 minutes from 08:00 to 02:00 Pakistan time, about 560 of Render's 750 free hours a month. GitHub pauses scheduled jobs in a repository with no activity for 60 days; re-enable it from the Actions tab if that happens.
 
 **Games survive restarts.** Render can restart a free server at any time, and pushing new code restarts it too. After every move the server gives each player's browser a sealed backup of the game (encrypted with a secret only the server knows, so nobody can read or edit it). If the server restarts, everyone's screen reconnects on its own and hands back its backup; the server keeps the newest one and pauses play for a few seconds until everyone is back, then the game continues from the last move. A crash in one message is logged and ignored instead of stopping the server.
 
@@ -82,6 +83,7 @@ Plain HTML, CSS and JavaScript modules with a small Node server: no frameworks. 
 | `public/js/main.js` | Connects to the room, sends your moves, and redraws when the server updates. |
 | `public/js/map-view.js` | Fits the map and handles local zoom, dragging, pinch zoom and keyboard controls. |
 | `public/js/sound.js` | Synthesised sound effects (preview them all at `/sounds.html`). |
+| `public/js/predict.js` | Shows your own certain moves instantly while the server confirms them. |
 | `public/js/effects.js` | Turns game events into animations and sounds, each played once, in order. |
 | `public/js/fx.js` | The animation pieces: flying cards, chips, banners, confetti. |
 | `public/css/art.css` | The only file that points at artwork, so the art can be swapped without touching the code. |
