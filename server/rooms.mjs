@@ -551,6 +551,20 @@ function roll(room) {
 }
 
 /* ---------- what each person is allowed to see ---------- */
+/**
+ * Events with private details removed: only the buyer learns which
+ * development card was drawn, and only the thief and the victim learn which
+ * resource was stolen. Everything else in an event is public table information.
+ */
+export function eventsFor(g, seat, reveal = g.winner !== null) {
+  return (g.events || []).map((e) => {
+    if (reveal) return e;
+    if (e.type === 'buyDev' && e.p !== seat) return { ...e, card: null };
+    if (e.type === 'steal' && e.from !== seat && e.to !== seat) return { ...e, res: null };
+    return e;
+  });
+}
+
 export function viewFor(room, token) {
   const me = room.members.get(token);
   const seat = seatOf(room, token);
@@ -560,6 +574,7 @@ export function viewFor(room, token) {
     const reveal = g.winner !== null;
     game = {
       ...g,
+      events: eventsFor(g, seat, reveal),
       toast: R.noticeFor(g.toast, seat >= 0 ? seat : null),
       deck: g.deck.map(() => null),
       players: g.players.map((pl, i) =>

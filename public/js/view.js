@@ -181,7 +181,6 @@ function renderPlayers(g, a, ui, me, room) {
     const member = bySeat(p);
     const visible = R.victoryPoints(g, p, false);
     const hidden = p === me ? R.victoryPoints(g, p, true) - visible : 0;
-    const gained = g.gains?.[p] ? R.totalCards(g.gains[p]) : 0;
     const away = member && !member.connected;
     const empty = !!room?.vacant?.includes(p);
     const amHost = !!room?.you?.host;
@@ -193,7 +192,7 @@ function renderPlayers(g, a, ui, me, room) {
       'aria-label': `${P.name}: ${visible} points, ${count(pl)} resource cards, ${pl.dev.length} development cards${g.cur === p ? ', playing now' : ''}${p === me ? ', you' : ''}${away ? ', disconnected' : ''}`,
     },
       playerMark(P),
-      h('span', { class: 'player-name', title: member?.host ? `${P.name} is hosting this room` : null }, h('span', { text: P.name }), p === me ? h('span', { class: 'tag you', text: 'You' }) : null, member?.bot ? h('span', { class: 'tag bot', text: 'Bot', title: 'A computer player' }) : null, away ? h('span', { class: 'tag away', text: 'Away' }) : null, empty ? h('span', { class: 'tag away', text: 'Autopilot', title: 'This player was removed. Their turns are played automatically.' }) : null, gained ? h('span', { class: 'gain-pop', text: `+${gained}` }) : null),
+      h('span', { class: 'player-name', title: member?.host ? `${P.name} is hosting this room` : null }, h('span', { text: P.name }), p === me ? h('span', { class: 'tag you', text: 'You' }) : null, member?.bot ? h('span', { class: 'tag bot', text: 'Bot', title: 'A computer player' }) : null, away ? h('span', { class: 'tag away', text: 'Away' }) : null, empty ? h('span', { class: 'tag away', text: 'Autopilot', title: 'This player was removed. Their turns are played automatically.' }) : null),
       h('span', { class: 'vp', title: hidden ? `${visible} visible + ${hidden} hidden` : 'Victory points' }, h('b', { text: visible + hidden }), h('small', { text: 'VP' })),
       h('span', { class: 'player-stats' },
         h('span', { class: 'stat', title: 'Resource cards' }, h('i', { class: 'card-glyph' }), String(count(pl))),
@@ -399,7 +398,6 @@ function renderDock(g, a, me) {
   const pl = g.players[me];
   const mine = me === g.cur;
   const picking = mine && (g.mode === 'plenty' || g.mode === 'monopoly');
-  const gains = g.gains?.[me];
   $('hand').replaceChildren(
     h('div', { class: 'hand-head' }, playerMark(P), h('span', { text: picking ? (g.mode === 'plenty' ? `Pick ${g.plentyLeft} from the bank` : 'Pick a resource to claim') : 'Your hand' }), h('small', { text: `${count(pl)} cards` })),
     h('div', { class: 'cards' },
@@ -408,14 +406,14 @@ function renderDock(g, a, me) {
         const pickable = picking && !(g.mode === 'plenty' && g.bank[r] <= 0);
         return h('button', {
           type: 'button',
-          class: `rcard r-${r}${n || picking ? '' : ' zero'}${gains?.[r] ? ' gained' : ''}${pickable ? ' pick' : ''}`,
+          class: `rcard r-${r}${n || picking ? '' : ' zero'}${pickable ? ' pick' : ''}`,
           disabled: !pickable,
           'aria-label': pickable ? `Choose ${R.RES_NAME[r]}` : `${n} ${R.RES_NAME[r]}`,
           onClick: () => a.pickResource(r),
         },
           h('span', { class: 'rcard-top' }, icon(r)),
           h('span', { class: 'rcard-name', text: R.RES_NAME[r] }),
-          h('span', { class: 'rcard-n', text: gains?.[r] ? `+${gains[r]}` : n }),
+          h('span', { class: 'rcard-n', text: n }),
         );
       }),
     ),
@@ -573,7 +571,7 @@ function renderModal(g, a, ui, me, room) {
   } else if (room.phase === 'lobby') {
     el = lobbyModal(a, ui, room);
   } else if (g.winner !== null) {
-    el = modal(`${name(g.winner)} wins!`, [
+    el = modal(g.winner === me ? 'You win!' : `${name(g.winner)} wins!`, [
       h('div', { class: 'winner-art' }, mark(g.winner)),
       h('p', { text: `${R.victoryPoints(g, g.winner, true)} victory points, including ${g.players[g.winner].dev.filter((c) => c.type === 'vp').length} hidden point cards.` }),
       room.practice

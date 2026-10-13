@@ -147,28 +147,3 @@ export function createSound({ muted = false } = {}) {
     setMuted(value) { isMuted = !!value; if (!isMuted) unlock(); },
   };
 }
-
-/**
- * Which sounds a state change deserves, from one seat's point of view.
- * Pure, so it can be tested without audio.
- */
-export function soundsFor(before, after, me) {
-  if (!before || !after || before === after) return [];
-  const out = [];
-  if (after.winner !== null && before.winner === null) return ['win'];
-  if (after.rolling && !before.rolling) out.push('dice');
-  if (after.townList.length > before.townList.length) out.push('build');
-  else if (after.townList.some((v) => after.settlements[v].city && !before.settlements[v]?.city)) out.push('city');
-  else if (after.roadList.length > before.roadList.length) out.push('road');
-  if (after.robber !== before.robber) out.push('robber');
-  if (me !== null && after.gains?.[me] && Object.values(after.gains[me]).some((n) => n > 0) && !before.gains?.[me]) out.push('gain');
-  if (after.deck.length < before.deck.length) out.push('card');
-  const newest = after.log[0];
-  if (newest && newest.id !== before.log[0]?.id && /traded/.test(newest.text)) out.push('trade');
-  if (newest && newest.id !== before.log[0]?.id && /ran out of time/.test(newest.text)) out.push('timeout');
-  if (me !== null && after.offer && !before.offer && after.cur !== me) out.push('offer');
-  const myTurnNow = me !== null && after.cur === me && (after.phase === 'roll' || after.phase === 'setup' || after.paired);
-  const turnChanged = after.cur !== before.cur || after.turn !== before.turn;
-  if (myTurnNow && turnChanged) out.push('turn');
-  return out;
-}

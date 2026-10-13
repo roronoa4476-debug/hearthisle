@@ -4,7 +4,9 @@ import * as R from './rules.js';
 import { getGeometry } from './geometry.js';
 import { render } from './view.js';
 import { createMapView } from './map-view.js';
-import { createSound, soundsFor } from './sound.js';
+import { createSound } from './sound.js';
+import { createEffects, freshEvents, shownPoints } from './effects.js';
+import { reattach } from './fx.js';
 
 const store = {
   get(key) { try { return localStorage.getItem(key); } catch { return null; } },
@@ -30,7 +32,8 @@ let ws = null;
 let retry = 0;
 let practiceRequest = false;
 let soloRequest = false;
-let reconnected = false; // the first update after a dropped connection shouldn't replay missed sounds
+let syncNext = true; // the first update after (re)connecting is old news: no animations or sounds
+let eventsSeen = 0;
 const savedName = (store.get('hearthisle-name') || '').trim();
 // Opening an invite link asks for your name first (unless this browser already knows it).
 let wantConnection = !!roomCode && !!savedName;
@@ -51,6 +54,8 @@ const ui = {
   deadline: null, // local time when the current turn timer runs out
 };
 const sound = createSound({ muted: store.get('hearthisle-muted') === '1' });
+const effects = createEffects({ sound, seat: () => mySeat(), game: () => game || preview });
+globalThis.koolkatanFx = () => effects.stats; // for checking the animations keep up with the game
 const timers = {};
 
 /* ---------- drawing ---------- */
@@ -73,6 +78,7 @@ function draw() {
   if (g.toast && g.toast.id === ui.toastHidden) g = { ...g, toast: null };
   render(g, actions, ui, room);
   fitBoard();
+  reattach(); // keep running card/row animations going on the redrawn elements
   paintTimer?.();
 }
 new ResizeObserver(fitBoard).observe(document.getElementById('table'));
@@ -89,6 +95,7 @@ function connect() {
   previous?.close();
   socket.addEventListener('open', () => {
     if (socket !== ws) return;
+    syncNext = true;
     const snapshot = roomCode ? store.get(`hearthisle-snap-${roomCode}`) : null;
     socket.send(JSON.stringify({ type: 'hello', room: roomCode, token, name: (ui.nameDraft || '').trim() || undefined, practice: practiceRequest && !roomCode, solo: soloRequest && !roomCode, snapshot: snapshot || undefined }));
   });
@@ -134,11 +141,10 @@ function connect() {
     soloRequest = false;
     game = msg.game;
     ui.deadline = Number.isFinite(room.deadlineIn) ? Date.now() + room.deadlineIn : null;
-    const sameGame = before && game && room.code === before.roomCode && game.serial >= before.serial && game.terrain.join() === before.terrain.join();
-    if (sameGame && !reconnected) for (const name of soundsFor(before, game, mySeat())) sound.play(name, name === 'gain' ? R.totalCards(game.gains[mySeat()]) : undefined);
-    else if (game && !sameGame && game.cur === mySeat() && game.winner === null) sound.play('turn'); // a new game where you go first
-    reconnected = false;
-    if (game) game.roomCode = room.code;
+    const fresh = freshEvents(before, game, eventsSeen, { sync: syncNext });
+    eventsSeen = fresh.seen;
+    const points = before && game && !syncNext && before.id === game.id ? [shownPoints(before, mySeat()), shownPoints(game, mySeat())] : null;
+    syncNext = false;
     ui.status = 'online';
     ui.error = '';
     roomCode = room.code;
@@ -156,10 +162,12 @@ function connect() {
       timers.toast = setTimeout(() => { ui.toastHidden = id; draw(); }, 3200);
     }
     draw();
+    // after drawing, so animations land on the updated table
+    effects.play(fresh.play);
+    if (points) effects.points(...points);
   };
   socket.addEventListener('close', () => {
     if (socket !== ws || !wantConnection) return;
-    reconnected = true;
     ui.status = 'connecting';
     showNotice('Connection lost — reconnecting…');
     clearTimeout(timers.retry);

@@ -90,6 +90,13 @@ function toast(g, text, only = null) {
   g.toast = { id: ++g.serial, text, ...(only ? { only } : {}) };
 }
 const tell = (g, p, text) => toast(g, null, { [p]: text }); // just for one seat
+// Events: exactly what just happened (cards moving, builds, turns...), so each
+// browser can animate and sound it once. Only the latest few are kept. The
+// server hides private details per seat (see viewFor in server/rooms.mjs).
+export const MAX_EVENTS = 30;
+function emit(g, type, data = {}) {
+  g.events = [...(g.events || []), { id: ++g.serial, type, ...data }].slice(-MAX_EVENTS);
+}
 export function noticeFor(t, seat) {
   if (!t) return null;
   const text = t.only && seat !== null && seat !== undefined && t.only[seat] !== undefined ? t.only[seat] : t.text;
@@ -281,10 +288,12 @@ function placeRoad(g, eid, p) {
   g.roadList.push(eid);
 }
 function grantOpening(g, vid, p) {
+  const flows = [];
   for (const h of geo(g).verts[vid].hexes) {
     const r = TERRAIN_RES[g.terrain[h]];
-    if (r && g.bank[r]>0) {g.players[p].res[r]++;g.bank[r]--;}
+    if (r && g.bank[r]>0) {g.players[p].res[r]++;g.bank[r]--;flows.push({ hex: h, p, res: r, n: 1 });}
   }
+  if (flows.length) emit(g, 'produce', { flows });
 }
 function updateLongest(g) {
   const lens = g.players.map((_, p) => longestRoadFor(g, p));
@@ -292,12 +301,14 @@ function updateLongest(g) {
   const max = Math.max(...lens), leaders=lens.flatMap((n,i)=>n===max?[i]:[]);
   const holder = max < 5 ? null : leaders.includes(g.longest) ? g.longest : leaders.length===1 ? leaders[0] : null;
   if (holder !== null && holder !== g.longest) log(g, `${player(g, holder).name} takes Longest Road (${lens[holder]}).`, holder);
+  if (holder !== g.longest) emit(g, 'award', { kind: 'longest', from: g.longest, to: holder });
   g.longest = holder;
 }
 function updateArmy(g) {
   const p = g.cur;
   const k = g.players[p].knights;
   if (k >= 3 && g.army !== p && (g.army === null || k > g.players[g.army].knights)) {
+    emit(g, 'award', { kind: 'army', from: g.army, to: p });
     g.army = p;
     log(g, `${player(g, p).name} takes Largest Army.`);
   }
@@ -307,6 +318,7 @@ function checkWin(g) {
     g.winner = g.cur;
     g.mode = null;
     log(g, `${player(g, g.cur).name} reaches ${winTarget(g)} points and wins.`);
+    emit(g, 'win', { p: g.cur });
   }
 }
 function steal(g, from, rng) {
@@ -316,6 +328,7 @@ function steal(g, from, rng) {
   const k = pool[Math.floor(rng() * pool.length)];
   r[k]--;
   g.players[g.cur].res[k]++;
+  emit(g, 'steal', { from, to: g.cur, res: k });
   toast(g, `${player(g, g.cur).name} stole a card from ${player(g, from).name}.`, {
     [g.cur]: `You took 1 ${RES_NAME[k]} from ${player(g, from).name}.`,
     [from]: `${player(g, g.cur).name} took 1 ${RES_NAME[k]} from you.`,
@@ -387,6 +400,8 @@ export function createGame({ randomize = true, autoSetup = true, rng = Math.rand
     victims: [],
     trade: { tab: 'bank', give: 'wheat', get: 'ore', giveN: 1, getN: 1 },
     winPoints, friendlyRobber: !!friendlyRobber,
+    id: Math.floor(rng() * 2 ** 31), // tells one game from the next (e.g. a rematch)
+    events: [],
   };
   if (autoSetup) {
     // Each player takes the best open corner in snake order (a quick-start helper).
@@ -423,13 +438,17 @@ export function createGame({ randomize = true, autoSetup = true, rng = Math.rand
     log(g, `A new island is drawn. ${player(g, g.firstPlayer).name} places first.`, firstPlayer);
     toast(g, `${player(g, g.firstPlayer).name}: place your first settlement on a corner.`);
   }
+  g.events = []; // nothing has been seen yet: quick-start placements aren't animated
+  emit(g, 'turn', { p: firstPlayer });
   return g;
 }
 
 /* ---------- actions ---------- */
 export function startRoll(s, rng = Math.random) {
   if (s.phase !== 'roll' || s.rolling || s.winner !== null || isBlocking(s) || s.mode) return s;
-  return { ...s, rolling: true, dice: rollDice(rng) };
+  const g = { ...s, rolling: true, dice: rollDice(rng) };
+  emit(g, 'roll', { p: s.cur });
+  return g;
 }
 
 export function resolveRoll(s, dice, rng = Math.random) {
@@ -442,6 +461,7 @@ export function resolveRoll(s, dice, rng = Math.random) {
   g.lastRoll = sum;
   g.phase = 'main';
   if (sum === 7) {
+    emit(g, 'seven', { p: g.cur });
     g.discards=g.players.flatMap((pl,p)=>totalCards(pl.res)>7?[{p,n:Math.floor(totalCards(pl.res)/2)}]:[]);
     g.mode=g.discards.length?'discard':'robber';
     log(g, `${me} rolled 7.`);
@@ -460,6 +480,7 @@ export function resolveRoll(s, dice, rng = Math.random) {
       if (t) gains[t.p][r] += t.city ? 2 : 1;
     }
   }
+  const wanted = gains.map((gr) => ({ ...gr }));
   for(const r of RES){
     const receivers=gains.flatMap((gr,i)=>gr[r]>0?[i]:[]),need=gains.reduce((sum,gr)=>sum+gr[r],0);
     if(need>g.bank[r]){
@@ -471,6 +492,19 @@ export function resolveRoll(s, dice, rng = Math.random) {
   }
   g.gains=gains;
   g.producing = producing;
+  // Which tile paid which card, trimmed to what the bank could actually pay.
+  const left = gains.map((gr) => ({ ...gr }));
+  const flows = [];
+  for (const hid of producing) {
+    const r = TERRAIN_RES[g.terrain[hid]];
+    for (const v of geo(g).hexes[hid].verts) {
+      const t = g.settlements[v];
+      if (!t) continue;
+      const n = Math.min(t.city ? 2 : 1, left[t.p][r]);
+      if (n > 0) { flows.push({ hex: hid, p: t.p, res: r, n }); left[t.p][r] -= n; }
+    }
+  }
+  emit(g, 'produce', { flows, shortage: RES.some((r) => wanted.some((gr, i) => gr[r] !== gains[i][r])) });
   const describe = (gr) => RES.filter((r) => gr[r]).map((r) => `${gr[r]} ${RES_NAME[r]}`).join(', ');
   const personal = {};
   gains.forEach((gr, i) => { if (describe(gr)) personal[i] = `Rolled ${sum} — you collect ${describe(gr)}.`; });
@@ -499,6 +533,7 @@ export function endTurn(s) {
   g.turn++;
   g.producing = [];
   g.gains=[];g.offer=null;checkWin(g);
+  if (g.winner === null) emit(g, 'turn', { p: g.cur });
   toast(g, `${player(g, g.cur).name}’s turn${g.paired?' — actions only.':' — roll the dice.'}`);
   return g;
 }
@@ -554,6 +589,7 @@ export function placeAtVertex(s, vid) {
     if (s.setup.need !== 'settlement' || !canSettle(s, vid, p, true)) return s;
     const g = clone(s);
     placeTown(g, vid, p);
+    emit(g, 'build', { p, kind: 'settlement', cost: {} });
     if (g.setup.step >= g.players.length) grantOpening(g, vid, p);
     g.setup.lastV = vid;
     g.setup.need = 'road';
@@ -567,11 +603,13 @@ export function placeAtVertex(s, vid) {
   if (g.mode === 'settlement' && canSettle(g, vid, p, false)) {
     payBank(g,p,COST.settlement);
     placeTown(g, vid, p);
+    emit(g, 'build', { p, kind: 'settlement', cost: COST.settlement });
     log(g, `${player(g, p).name} built a settlement.`);
     updateLongest(g); // a new settlement can cut an opponent's road
   } else if (g.mode === 'city' && canCity(g, vid, p)) {
     payBank(g,p,COST.city);
     g.settlements[vid].city = true;
+    emit(g, 'build', { p, kind: 'city', cost: COST.city });
     log(g, `${player(g, p).name} raised a city.`);
   } else {
     return s;
@@ -588,6 +626,7 @@ export function placeAtEdge(s, eid) {
   const g = clone(s);
   if (g.phase === 'setup') {
     placeRoad(g, eid, p);
+    emit(g, 'build', { p, kind: 'road', cost: {} });
     g.setup.step++;
     if (g.setup.step >= g.setupOrder.length) {
       g.phase = 'roll';
@@ -601,13 +640,16 @@ export function placeAtEdge(s, eid) {
       g.mode = null;
       toast(g, `${player(g, g.cur).name}: place a settlement.`);
     }
+    if (g.cur !== p) emit(g, 'turn', { p: g.cur });
     updateLongest(g);
     return g;
   }
   if (g.mode !== 'road' || !canCompleteBuild(g, 'road')) return s;
-  if (g.freeRoads > 0) g.freeRoads--;
+  const free = g.freeRoads > 0;
+  if (free) g.freeRoads--;
   else payBank(g,p,COST.road);
   placeRoad(g, eid, p);
+  emit(g, 'build', { p, kind: 'road', cost: free ? {} : COST.road });
   log(g, `${player(g, p).name} built a road.`);
   updateLongest(g);
   if (!(g.freeRoads > 0 && piecesLeft(g, p).road > 0 && validEdges(g).length)) {
@@ -622,6 +664,7 @@ export function moveRobber(s, hid, rng = Math.random) {
   if (s.winner!==null || s.mode !== 'robber' || !robberTargets(s).includes(hid)) return s;
   const g = clone(s);
   g.robber = hid;
+  emit(g, 'robber', { p: g.cur, hex: hid });
   const n = g.numbers[hid];
   log(g, `${player(g, g.cur).name} moved the robber to ${TERRAIN_NAME[g.terrain[hid]]}${n ? ` ${n}` : ''}.`);
   const victims = [];
@@ -662,6 +705,7 @@ export function buyDevCard(s) {
   payBank(g,p,COST.dev);
   const card = g.deck.pop();
   pl.dev.push({ type: card, turn: g.turn });
+  emit(g, 'buyDev', { p, card, cost: COST.dev }); // the card type is shown only to the buyer
   g.mode = null;
   toast(g, `${player(g, p).name} bought a development card.`, { [p]: `You drew ${DEV_NAME[card]}.` });
   log(g, `${player(g, p).name} bought a development card.`);
@@ -677,6 +721,7 @@ export function playDevCard(s, type) {
   const name = player(g, p).name;
   pl.dev.splice(pl.dev.findIndex((c) => c.type === type && c.turn < g.turn), 1);
   g.devPlayed = true;
+  emit(g, 'playDev', { p, card: type });
   if (type === 'knight') {
     pl.knights++;
     updateArmy(g);
@@ -713,15 +758,18 @@ export function pickResource(s, r) {
   const p = g.cur;
   if (g.mode === 'plenty') {
     g.players[p].res[r]++;g.bank[r]--;
+    emit(g, 'plenty', { p, res: r });
     g.plentyLeft--;
     if (g.plentyLeft <= 0 || totalCards(g.bank)===0) g.mode = null;
   } else {
     let n = 0;
+    const takes = g.players.map((pl, i) => (i === p ? 0 : pl.res[r]));
     g.players.forEach((pl, i) => {
       if (i === p) return;
       n += pl.res[r];
       pl.res[r] = 0;
     });
+    emit(g, 'monopoly', { p, res: r, takes });
     g.players[p].res[r] += n;
     g.mode = null;
     toast(g, `Monopoly claims ${n} ${RES_NAME[r]}.`);
@@ -745,6 +793,7 @@ export function bankTrade(s) {
   const ratio = harborRatio(g, p, give);
   g.players[p].res[give] -= ratio;g.bank[give]+=ratio;
   g.players[p].res[get] += 1;g.bank[get]--;
+  emit(g, 'bank', { p, give: { [give]: ratio }, get: { [get]: 1 } });
   log(g, `${player(g, p).name} traded ${ratio} ${RES_NAME[give]} for 1 ${RES_NAME[get]}.`);
   cancelUnaffordableBuild(g);
   return g;
@@ -771,6 +820,7 @@ export function acceptOffer(s, q) {
   b[give] += giveN;
   b[get] -= getN;
   a[get] += getN;
+  emit(g, 'trade', { a: g.cur, b: q, aGives: { [give]: giveN }, bGives: { [get]: getN } });
   toast(g, `${player(g, q).name} accepted your offer.`);
   log(g, `${player(g, g.cur).name} traded with ${player(g, q).name}.`);
   cancelUnaffordableBuild(g);
@@ -788,7 +838,7 @@ export function discardCards(s,cards,who=s.discards?.[0]?.p){
   if(i<0)return s;
   const {p,n}=s.discards[i];
   if(totalCards(cards)!==n||!afford(s.players[p].res,cards))return s;
-  const g=clone(s);payBank(g,p,cards);g.discards.splice(i,1);g.mode=g.discards.length?'discard':'robber';
+  const g=clone(s);payBank(g,p,cards);emit(g,'discard',{p,cards:clone(cards)});g.discards.splice(i,1);g.mode=g.discards.length?'discard':'robber';
   log(g,`${player(g, p).name} discarded ${n} cards.`,p);return g;
 }
 export function updateAwards(s){const g=clone(s);updateLongest(g);checkWin(g);return g;}
@@ -801,7 +851,7 @@ const validBasket=b=>!!b&&typeof b==='object'&&RES.every(r=>Number.isInteger(b[r
 export function validExchange(give,get){return validBasket(give)&&validBasket(get)&&totalCards(give)>0&&totalCards(get)>0&&RES.every(r=>!(give[r]&&get[r]));}
 export function proposeTrade(s,give,get){
   if(!tradeOpen(s)||s.paired||!validExchange(give,get)||!afford(s.players[s.cur].res,give))return s;
-  const g=clone(s);g.offer={give:clone(give),get:clone(get),responses:{}};return g;
+  const g=clone(s);g.offer={give:clone(give),get:clone(get),responses:{}};emit(g,'offer',{p:g.cur});return g;
 }
 export function respondTrade(s,p,accept){
   if(!s.offer||!tradeOpen(s)||s.paired||!Number.isInteger(p)||p===s.cur||!s.players[p])return s;
@@ -819,6 +869,7 @@ export function confirmTrade(s,p){
   if(!validExchange(give,get)||!afford(s.players[s.cur].res,give)||!afford(s.players[p].res,get))return s;
   const g=clone(s);
   for(const r of RES){g.players[g.cur].res[r]+=get[r]-give[r];g.players[p].res[r]+=give[r]-get[r];}
+  emit(g, 'trade', { a: g.cur, b: p, aGives: clone(give), bGives: clone(get) });
   g.offer=null;cancelUnaffordableBuild(g);log(g,`${player(g, g.cur).name} traded with ${player(g, p).name}.`);return g;
 }
 export function withdrawTrade(s){return s.offer?{...s,offer:null}:s;}
@@ -841,6 +892,7 @@ export function noteTimeout(s, seats) {
   const names = seats.map((p) => player(g, p).name).join(' and ');
   log(g, `${names} ran out of time.`, seats[0]);
   toast(g, `${names} ran out of time.`);
+  emit(g, 'timeout', { seats });
   return g;
 }
 export const vertexValue = (g, vid) => vertexScore(g, vid); // how productive a corner is

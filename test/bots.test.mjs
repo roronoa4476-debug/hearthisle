@@ -4,7 +4,6 @@ import assert from 'node:assert/strict';
 import * as Rooms from '../server/rooms.mjs';
 import * as R from '../public/js/rules.js';
 import { botStep, wantsOffer, discardChoice } from '../server/bots.mjs';
-import { soundsFor } from '../public/js/sound.js';
 import { seal, unseal } from '../server/snapshots.mjs';
 
 const tok = (n) => n.toString(16).padStart(32, '0');
@@ -261,14 +260,6 @@ test('bots and options survive a server restart', () => {
   assert.notEqual(back.game.winner, null);
 });
 
-test('sounds follow what happened on the table', () => {
-  const g = R.createGame({ autoSetup: true, rng: seeded(2) });
-  assert.deepEqual(soundsFor(g, { ...g, rolling: true }, 1), ['dice']);
-  assert.deepEqual(soundsFor(g, { ...g, winner: 0 }, 1), ['win']);
-  assert.ok(soundsFor(g, { ...g, robber: (g.robber + 1) % 19 }, 1).includes('robber'));
-  assert.ok(soundsFor({ ...g, cur: 2 }, { ...g, cur: 1, phase: 'roll' }, 1).includes('turn'));
-  assert.deepEqual(soundsFor(g, g, 1), []);
-});
 
 test('bots finish 12-point games, building roads for Longest Road once the board is full', () => {
   for (const count of [4, 6]) {
