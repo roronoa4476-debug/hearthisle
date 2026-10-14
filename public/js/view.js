@@ -9,6 +9,10 @@ import { settlementArt, cityArt, roadArt, robberArt, playerMark } from './pieces
 const FACES = { 1: [4], 2: [2, 6], 3: [2, 4, 6], 4: [0, 2, 6, 8], 5: [0, 2, 4, 6, 8], 6: [0, 2, 3, 5, 6, 8] };
 const $ = (id) => document.getElementById(id);
 
+// Elements that got event handlers from h(). When one of these changes it is
+// replaced whole, so a button never keeps a handler made for older data.
+const listened = new WeakSet();
+
 /** Element builder using DOM APIs only (no innerHTML), so it works under a strict CSP. */
 function h(tag, props = {}, ...children) {
   const el = document.createElement(tag);
@@ -17,7 +21,7 @@ function h(tag, props = {}, ...children) {
     if (key === 'class') el.className = value;
     else if (key === 'text') el.textContent = value;
     else if (key === 'style') for (const [k, v] of Object.entries(value)) el.style.setProperty(k, v);
-    else if (key.startsWith('on')) el.addEventListener(key.slice(2).toLowerCase(), value);
+    else if (key.startsWith('on')) { el.addEventListener(key.slice(2).toLowerCase(), value); listened.add(el); }
     else el.setAttribute(key, value === true ? '' : String(value));
   }
   for (const child of children.flat()) {
@@ -26,6 +30,32 @@ function h(tag, props = {}, ...children) {
   }
   return el;
 }
+/**
+ * Show `next` as the children of `parent`, changing only what differs from
+ * what is already there. Rebuilding whole panels on every update made phones
+ * restyle, relayout and repaint the entire screen many times a minute; most
+ * updates only change a few numbers. Unchanged parts (and their scroll
+ * position and focus) are left exactly as they are.
+ */
+function patch(parent, next) {
+  next = next.flat().filter((n) => n !== null && n !== undefined && n !== false).map((n) => (n instanceof Node ? n : document.createTextNode(String(n))));
+  if (!parent.childNodes) return parent.replaceChildren(...next); // simple test doubles
+  const old = [...parent.childNodes];
+  next.forEach((n, i) => (old[i] ? patchNode(old[i], n) : parent.append(n)));
+  for (let i = next.length; i < old.length; i++) old[i].remove();
+}
+function sameAttributes(a, b) {
+  if (a.attributes.length !== b.attributes.length) return false;
+  for (const { name, value } of a.attributes) if (b.getAttribute(name) !== value) return false;
+  return true;
+}
+function patchNode(a, b) {
+  if (a.isEqualNode(b)) return;
+  if (a.nodeType === 3 && b.nodeType === 3) { a.nodeValue = b.nodeValue; return; }
+  if (a.nodeType !== 1 || a.nodeName !== b.nodeName || listened.has(b) || !sameAttributes(a, b)) { a.replaceWith(b); return; }
+  patch(a, [...b.childNodes]);
+}
+
 const btn = (text, onClick, props = {}) => h('button', { type: 'button', text, onClick, ...props });
 const icon = (name, extra = '') => h('span', { class: `icon i-${name}${extra ? ` ${extra}` : ''}`, 'aria-hidden': 'true' });
 let RESTORING = false; // true for a few seconds after a server restart
@@ -163,7 +193,7 @@ function renderBoard(g, a, me) {
       hits.push(h('button', { class: 'target', type: 'button', 'aria-label': `Move the robber to ${R.TERRAIN_NAME[g.terrain[hid]]}${n ? ` ${n}` : ''}`, style: at(hx.x, hx.y), onClick: () => a.moveRobber(hid) }));
     }
   }
-  board.overlay.replaceChildren(...hits);
+  patch(board.overlay, hits);
   $('notice').textContent = noticeFor(g, me);
 }
 
@@ -206,29 +236,29 @@ function renderPlayers(g, a, ui, me, room) {
     );
   });
   const watchers = members.filter((m) => m.role === 'spectator' || m.seat < 0 && room?.phase === 'game');
-  $('players').replaceChildren(
+  patch($('players'), [
     panelTitle(room?.practice ? 'Practice' : 'Players', room ? h('small', { text: `Room ${room.code}` }) : null),
     h('div', { class: 'player-list', role: 'list' }, ...rows),
     ...(watchers.length ? [h('p', { class: 'watchers' }, h('span', { class: 'eye', 'aria-hidden': 'true' }), `Watching: ${watchers.map((m) => m.name + (m.connected ? '' : ' (away)')).join(', ')}`)] : []),
-  );
+  ]);
 }
 
 function renderBank(g) {
   const low = (n) => n <= 3;
-  $('bank').replaceChildren(
+  patch($('bank'), [
     panelTitle('Bank', h('small', { text: 'cards left' })),
     h('div', { class: 'bank-row' },
       ...R.RES.map((r) => h('div', { class: `stack${low(g.bank[r]) ? ' low' : ''}`, 'data-res': r, title: `${g.bank[r]} ${R.RES_NAME[r]} in the bank` }, h('span', { class: `mini-card r-${r}` }, icon(r)), h('b', { text: g.bank[r] }))),
       h('div', { class: 'stack', 'data-res': 'dev', title: `${g.deck.length} development cards left in the face-down deck`, 'aria-label': `Development deck: ${g.deck.length} cards left, types hidden` }, h('span', { class: 'mini-card dev' }, icon('dev-back')), h('b', { text: g.deck.length })),
     ),
-  );
+  ]);
 }
 
 function renderLog(g) {
-  $('log').replaceChildren(
+  patch($('log'), [
     panelTitle('Recent moves'),
     h('ol', {}, ...g.log.slice(0, 14).map((e) => h('li', {}, h('i', { style: { 'background-color': e.color } }), h('span', { text: e.text })))),
-  );
+  ]);
 }
 
 /* ---------- right column ---------- */
@@ -255,7 +285,7 @@ function renderTurn(g, a, me) {
   const extra = [];
   if (mine && g.mode === 'steal') extra.push(h('div', { class: 'choice-row' }, ...g.victims.map((q) => btn(`Take from ${name(q)}`, () => a.stealFrom(q), { class: 'btn small wood' }))));
   if (mine && !blocking && g.phase === 'main' && ['road', 'settlement', 'city'].includes(g.mode)) extra.push(btn('Cancel building (Esc)', a.cancelBuild, { class: 'linkish' }));
-  $('turn').replaceChildren(
+  patch($('turn'), [
     h('div', { class: 'turn-head' }, playerMark(P), h('div', { class: 'turn-title' }, h('div', { class: 'turn-name', text: g.cur === me ? 'Your turn' : `${P.name}’s turn` }), h('div', { class: 'turn-sub', text: sub })), h('span', { id: 'turn-timer', class: 'timer', role: 'timer', 'aria-label': 'Time left this turn', hidden: true })),
     h('p', { class: `prompt well${mine && !RESTORING ? ' mine' : ''}`, text: RESTORING ? 'The server restarted. Restoring the game while everyone reconnects…' : mine ? R.prompt(g) : waitingText(g, me) }),
     h('div', { class: 'turn-row' },
@@ -263,7 +293,7 @@ function renderTurn(g, a, me) {
       rollPhase && g.phase === 'setup' ? h('span', { class: 'muted', text: 'Place on the board' }) : mainBtn,
     ),
     ...extra,
-  );
+  ]);
 }
 
 const describe = (b) => R.RES.filter((r) => b[r]).flatMap((r) => [h('b', { text: b[r] }), icon(r)]);
@@ -355,12 +385,12 @@ function renderTrade(g, a, ui, me) {
   } else {
     content.push(h('p', { class: 'muted well', style: { padding: '10px' }, text: mine ? 'Roll the dice first, then you can offer trades.' : `When ${name(g.cur)} offers a trade, it appears here for you to accept, decline or counter.` }));
   }
-  $('trade').replaceChildren(...content);
+  patch($('trade'), content);
 }
 
 function renderDevs(g, a, ui, me) {
   if (me === null) {
-    $('devs').replaceChildren(panelTitle('Development cards', h('small', { text: `${g.deck.length} in deck` })), h('p', { class: 'muted', text: 'You are watching this game. Players’ cards stay hidden.' }));
+    patch($('devs'), [panelTitle('Development cards', h('small', { text: `${g.deck.length} in deck` })), h('p', { class: 'muted', text: 'You are watching this game. Players’ cards stay hidden.' })]);
     return;
   }
   const pl = g.players[me];
@@ -380,25 +410,25 @@ function renderDevs(g, a, ui, me) {
     );
   });
   const canBuy = mine && R.tradeOpen(g) && g.deck.length > 0 && R.afford(pl.res, R.COST.dev);
-  $('devs').replaceChildren(
+  patch($('devs'), [
     panelTitle('Development cards', h('small', { text: `${g.deck.length} in deck` })),
     h('div', { class: 'buy' }, btn('Buy a card', a.buyDevCard, { class: 'btn small wood', disabled: !canBuy, title: `Costs ${R.costText(R.COST.dev)}` }), costIcons(R.COST.dev)),
     cards.length ? h('div', { class: 'dev-list' }, cards) : h('p', { class: 'muted', text: 'No development cards yet. Buy one to draw a random card.' }),
-  );
+  ]);
 }
 
 /* ---------- dock ---------- */
 function renderDock(g, a, me) {
   if (me === null) {
-    $('hand').replaceChildren(h('div', { class: 'spectating' }, h('span', { class: 'eye big', 'aria-hidden': 'true' }), h('div', {}, h('b', { text: 'You’re watching' }), h('p', { class: 'muted', text: 'You can see the board, trades and everyone’s public info. Hands stay hidden.' }))));
-    $('builds').replaceChildren();
+    patch($('hand'), [h('div', { class: 'spectating' }, h('span', { class: 'eye big', 'aria-hidden': 'true' }), h('div', {}, h('b', { text: 'You’re watching' }), h('p', { class: 'muted', text: 'You can see the board, trades and everyone’s public info. Hands stay hidden.' })))]);
+    patch($('builds'), []);
     return;
   }
   const P = who(me);
   const pl = g.players[me];
   const mine = me === g.cur;
   const picking = mine && (g.mode === 'plenty' || g.mode === 'monopoly');
-  $('hand').replaceChildren(
+  patch($('hand'), [
     h('div', { class: 'hand-head' }, playerMark(P), h('span', { text: picking ? (g.mode === 'plenty' ? `Pick ${g.plentyLeft} from the bank` : 'Pick a resource to claim') : 'Your hand' }), h('small', { text: `${count(pl)} cards` })),
     h('div', { class: 'cards' },
       ...R.RES.map((r) => {
@@ -417,10 +447,10 @@ function renderDock(g, a, me) {
         );
       }),
     ),
-  );
+  ]);
   const left = R.piecesLeft(g, me);
   const art = { road: roadArt, settlement: settlementArt, city: cityArt };
-  $('builds').replaceChildren(
+  patch($('builds'), [
     ...['road', 'settlement', 'city'].map((kind) =>
       h('button', {
         type: 'button',
@@ -436,7 +466,7 @@ function renderDock(g, a, me) {
         h('small', { text: `${left[kind]} left` }),
       ),
     ),
-  );
+  ]);
 }
 
 /* ---------- dialogs ---------- */
@@ -624,17 +654,8 @@ function renderModal(g, a, ui, me, room) {
       !ui.history && (g.logCount || 0) > g.log.length ? h('p', { class: 'muted', text: 'Loading earlier moves…' }) : null,
     ], a);
   }
-  // Redrawing replaces the dialog, so keep its scroll position when it is the same dialog.
-  const root = $('modal-root');
-  const old = root.firstElementChild;
-  const same = el && old && old.querySelector?.('[role=dialog]')?.getAttribute('aria-label') === el.querySelector?.('[role=dialog]')?.getAttribute('aria-label');
-  const scroll = same ? [old.scrollTop, old.querySelector('.modal')?.scrollTop] : null;
-  root.replaceChildren(...(el ? [el] : []));
-  if (scroll) {
-    el.scrollTop = scroll[0];
-    const box = el.querySelector('.modal');
-    if (box) box.scrollTop = scroll[1];
-  }
+  // Patching keeps an open dialog (and where it is scrolled to) in place across updates.
+  patch($('modal-root'), el ? [el] : []);
   // The header (sound and menu buttons) stays usable while a dialog is open.
   for (const id of ['players', 'bank', 'log', 'right', 'table', 'dock']) $(id).inert = !!el;
 }

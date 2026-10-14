@@ -103,11 +103,35 @@ export function reattach() {
   }
 }
 
+/**
+ * A glowing outline laid over an element that fades in and out. Only its
+ * opacity animates, which phones hand to the graphics chip; animating a real
+ * element's shadow or filter instead repaints that area on every frame.
+ */
+export function halo(target, colour, { duration = 700, ring = 3, blur = 14 } = {}) {
+  const el = typeof target === 'function' ? target() : target;
+  if (!el || reduced()) return Promise.resolve();
+  const r = el.getBoundingClientRect();
+  if (!r.width || !r.height) return Promise.resolve();
+  const glowEl = document.createElement('span');
+  glowEl.className = 'fx-halo';
+  glowEl.style.setProperty('width', `${r.width}px`);
+  glowEl.style.setProperty('height', `${r.height}px`);
+  glowEl.style.setProperty('transform', `translate(${r.left}px, ${r.top}px)`);
+  glowEl.style.setProperty('border-radius', getComputedStyle(el).borderRadius);
+  glowEl.style.setProperty('box-shadow', `0 0 0 ${ring}px ${colour}, 0 0 ${blur}px ${ring}px ${colour}`);
+  layer().append(glowEl);
+  return quietly(glowEl.animate([{ opacity: 0 }, { opacity: 0.9, offset: 0.3 }, { opacity: 0 }], { duration, easing: 'ease-out' }).finished).then(() => glowEl.remove());
+}
+
 /** A quick reaction on an element (or a function that finds it): 'gain' (bump + green glow), 'lose' (dip + red), 'pop', 'nudge', 'tick'. */
 export function react(target, kind = 'pop') {
+  // movement only (cheap); the coloured glow is a separate halo
+  if (kind === 'gain') halo(target, 'rgba(47,164,94,.85)', { duration: 420, ring: 2, blur: 10 });
+  if (kind === 'lose') halo(target, 'rgba(200,55,43,.85)', { duration: 420, ring: 2, blur: 10 });
   const frames = {
-    gain: [{ transform: 'none', filter: 'none' }, { transform: 'translateY(-7px) scale(1.06)', filter: 'drop-shadow(0 0 6px rgba(47,164,94,.9))', offset: 0.35 }, { transform: 'none', filter: 'none' }],
-    lose: [{ transform: 'none', filter: 'none' }, { transform: 'translateY(4px) scale(.95)', filter: 'drop-shadow(0 0 6px rgba(200,55,43,.9))', offset: 0.35 }, { transform: 'none', filter: 'none' }],
+    gain: [{ transform: 'none' }, { transform: 'translateY(-7px) scale(1.06)', offset: 0.35 }, { transform: 'none' }],
+    lose: [{ transform: 'none' }, { transform: 'translateY(4px) scale(.95)', offset: 0.35 }, { transform: 'none' }],
     pop: [{ transform: 'none' }, { transform: 'scale(1.22)', offset: 0.4 }, { transform: 'none' }],
     tick: [{ transform: 'none' }, { transform: 'scale(1.12)', offset: 0.5 }, { transform: 'none' }],
     nudge: [{ transform: 'none' }, { transform: 'translateX(-5px)' }, { transform: 'translateX(5px)' }, { transform: 'translateX(-3px)' }, { transform: 'none' }],
@@ -134,11 +158,7 @@ export function chip(target, text, good = true) {
 
 /** A soft glow sweeping across an element (e.g. the player whose turn it is). */
 export function glow(target, colour = '#1f6fe0') {
-  return onElement(target, [
-    { boxShadow: `0 0 0 0 ${colour}00` },
-    { boxShadow: `0 0 0 4px ${colour}aa, 0 0 18px 4px ${colour}66`, offset: 0.3 },
-    { boxShadow: `0 0 0 0 ${colour}00` },
-  ], { duration: 900, easing: 'ease-out' });
+  return halo(target, colour, { duration: 900, ring: 3, blur: 16 });
 }
 
 /** A banner across the middle of an element, e.g. "Your turn". */
@@ -214,7 +234,7 @@ export function hop(target) {
 }
 
 /** A coloured flash over an element (e.g. red on the dice for a 7). */
-export function flash(target, colour = 'rgba(200,55,43,.55)') {
-  return onElement(target, [{ filter: 'none' }, { filter: `drop-shadow(0 0 10px ${colour}) brightness(1.05)`, offset: 0.3 }, { filter: 'none' }], { duration: 700 });
+export function flash(target, colour = 'rgba(200,55,43,.7)') {
+  return halo(target, colour, { duration: 700, ring: 4, blur: 18 });
 }
 
