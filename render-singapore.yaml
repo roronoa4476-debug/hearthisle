@@ -1,0 +1,19 @@
+# The game's server in Singapore: about half the round-trip time from South
+# Asia (Pakistan ~0.13 s, against ~0.30 s to Oregon). Create it on Render with
+# New → Blueprint, choosing this file as the Blueprint path. Render generates the
+# backup secret itself. The original Oregon service (render.yaml) then forwards
+# visitors here by setting its REDIRECT_TO to this service's address.
+services:
+  - type: web
+    name: koolkatan-sg
+    runtime: node
+    region: singapore
+    plan: free
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      # Secret used to seal game backups so a restart can't lose a game. Render generates it once.
+      - key: SNAPSHOT_SECRET
+        generateValue: true

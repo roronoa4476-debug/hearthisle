@@ -14,18 +14,3 @@ services:
       - key: SNAPSHOT_SECRET
         generateValue: true
 
-  # The same game in Singapore: about half the round-trip time from South Asia
-  # (Pakistan: ~0.13 s instead of ~0.30 s to Oregon). Once it's live, the
-  # service above forwards visitors here (REDIRECT_TO).
-  - type: web
-    name: koolkatan-sg
-    runtime: node
-    region: singapore
-    plan: free
-    buildCommand: npm ci
-    startCommand: npm start
-    healthCheckPath: /api/health
-    autoDeploy: true
-    envVars:
-      - key: SNAPSHOT_SECRET
-        generateValue: true
