@@ -11,6 +11,7 @@ import * as Rooms from './server/rooms.mjs';
 import { seal, unseal } from './server/snapshots.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
+const REDIRECT_TO = (process.env.REDIRECT_TO || '').replace(/\/+$/, '');
 const publicDir = resolve(root, 'public');
 
 const TYPES = {
@@ -47,6 +48,12 @@ export function createApp() {
     if (url.pathname === '/api/health') {
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
       res.end(JSON.stringify({ status: 'ready' }));
+      return;
+    }
+    // A server that has moved (e.g. to a closer region) forwards every page to its
+    // new address, keeping the path and any ?room= invite code.
+    if (REDIRECT_TO) {
+      res.writeHead(308, { Location: `${REDIRECT_TO}${url.pathname}${url.search}`, 'Cache-Control': 'no-store' }).end();
       return;
     }
     let pathname;

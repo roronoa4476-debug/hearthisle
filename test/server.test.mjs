@@ -71,3 +71,21 @@ test('artwork is cached for a week; unchanged files answer 304 without a body', 
     await new Promise((r) => server.close(r));
   }
 });
+
+test('a moved server forwards pages (with invite codes) to its new address but still reports healthy', async () => {
+  process.env.REDIRECT_TO = 'https://example.test/';
+  const { createApp: fresh } = await import(`../server.mjs?moved=${Date.now()}`);
+  delete process.env.REDIRECT_TO;
+  const server = fresh();
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const page = await fetch(`${base}/?room=ABCD`, { redirect: 'manual' });
+    assert.equal(page.status, 308);
+    assert.equal(page.headers.get('location'), 'https://example.test/?room=ABCD');
+    assert.equal((await fetch(`${base}/api/health`)).status, 200);
+  } finally {
+    server.wss.clients.forEach((ws) => ws.terminate());
+    await new Promise((r) => server.close(r));
+  }
+});
