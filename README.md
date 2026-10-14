@@ -1,6 +1,6 @@
 # Koolkatan
 
-**[Play Koolkatan](https://koolkatan.onrender.com/)** — create a room and share its link with friends.
+**[Play Koolkatan](https://koolkatan-sg.onrender.com/)** — create a room and share its link with friends.
 
 Version **0.7.0** adds table animations: cards fly between the board, hands, players and the bank whenever resources are collected, paid, traded, discarded or stolen, with turn banners, award hand-overs and confetti for the winner. It also brings a wooden dice sound, smoother map zoom, people choosing colours before bots, and lighter, faster updates. Version 0.6.0 added computer players, game options, a turn timer, rematches, sound effects and a phone layout.
 
@@ -49,7 +49,7 @@ The game runs as one small Node server, which fits [Render's free plan](https://
 
 1. Sign in to [render.com](https://render.com) with this GitHub account.
 2. Choose **New → Blueprint** and pick this repository. Render reads `render.yaml` and sets everything up.
-3. When it's live, share the public address shown by Render. This project's game is at [koolkatan.onrender.com](https://koolkatan.onrender.com/).
+3. When it's live, share the public address shown by Render. This project's game runs in Singapore at [koolkatan-sg.onrender.com](https://koolkatan-sg.onrender.com/) (created from `render-singapore.yaml`), about three times quicker per move from South Asia than the original Oregon server. The old address, koolkatan.onrender.com, still works: that service has `REDIRECT_TO` set and forwards every visitor, invite links included.
 
 Free-plan notes: the server sleeps after 15 minutes with nobody connected, so the first person to open the link may wait up to a minute while it wakes. It stays awake while a game is being played, and a free scheduled GitHub job (`.github/workflows/keep-awake.yml`) visits it every 10 minutes from 08:00 to 02:00 Pakistan time, about 560 of Render's 750 free hours a month. GitHub pauses scheduled jobs in a repository with no activity for 60 days; re-enable it from the Actions tab if that happens.
 

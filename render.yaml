@@ -1,4 +1,6 @@
 # One-click setup for Render's free tier (https://render.com).
+# The live game now runs from render-singapore.yaml; this original Oregon service
+# has REDIRECT_TO=https://koolkatan-sg.onrender.com set in the Render dashboard.
 # Render reads this file when you create a "Blueprint" from the GitHub repo.
 services:
   - type: web

@@ -1,4 +1,4 @@
-# Keeps the free Render server awake during the day so the first visitor
+# Keeps the free Render server (Singapore) awake during the day so the first visitor
 # doesn't wait for it to start (it sleeps after 15 minutes without visits).
 # Every 10 minutes from 08:00 to 02:00 Pakistan time (03:00–20:59 UTC):
 # about 560 server hours a month, inside Render's 750 free hours.
@@ -18,4 +18,4 @@ jobs:
     timeout-minutes: 3
     steps:
       - name: Visit the health check
-        run: curl --silent --show-error --fail --retry 3 --retry-delay 20 --max-time 90 https://koolkatan.onrender.com/api/health
+        run: curl --silent --show-error --fail --retry 3 --retry-delay 20 --max-time 90 https://koolkatan-sg.onrender.com/api/health
