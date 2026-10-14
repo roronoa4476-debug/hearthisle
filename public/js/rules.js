@@ -33,7 +33,6 @@ export function player(g, p) {
   const base = PLAYERS[seat ? seat.color : p];
   return seat?.name ? { ...base, name: seat.name } : base;
 }
-export const SETUP_ORDER = [0, 1, 2, 3, 3, 2, 1, 0];
 export const DEV_TYPES = ['knight', 'roads', 'plenty', 'monopoly', 'vp'];
 export const DEV_NAME = { knight: 'Knight', roads: 'Road Building', plenty: 'Year of Plenty', monopoly: 'Monopoly', vp: 'Victory Point' };
 export const DEV_TEXT = {
@@ -70,6 +69,16 @@ export const costText = (c) => Object.keys(c).map((k) => `${c[k]} ${RES_NAME[k]}
 export const isBlocking = (s) => BLOCKING.includes(s.mode) || s.freeRoads > 0;
 const pay = (r, c) => Object.keys(c).forEach((k) => (r[k] -= c[k]));
 const clone = (s) => structuredClone(s);
+// A new game state for a move. The move list and events are never changed in
+// place (log() and emit() always make new arrays), so they are shared instead
+// of copied: copying the long move list was most of the server's work.
+const cloneGame = (s) => {
+  const { log: moves, events, ...rest } = s;
+  const g = structuredClone(rest);
+  g.log = moves;
+  if (events !== undefined) g.events = events;
+  return g;
+};
 const shuffle = (list, rng) => {
   const a = list.slice();
   for (let i = a.length - 1; i > 0; i--) {
@@ -232,7 +241,7 @@ export function canPlayDev(g, type) {
   return g.players[g.cur].dev.some((c) => c.type === type && c.turn < g.turn);
 }
 export const tradeOpen = (g) => g.phase === 'main' && g.winner === null && !isBlocking(g) && !g.rolling;
-export function bankTradeOk(g, t = g.trade) {
+export function bankTradeOk(g, t) {
   return tradeOpen(g) && RES.includes(t.give) && RES.includes(t.get) && t.give !== t.get && g.bank[t.get] > 0 && g.players[g.cur].res[t.give] >= harborRatio(g, g.cur, t.give);
 }
 export function validVertices(g) {
@@ -397,7 +406,6 @@ export function createGame({ randomize = true, autoSetup = true, rng = Math.rand
     freeRoads: 0,
     plentyLeft: 0,
     victims: [],
-    trade: { tab: 'bank', give: 'wheat', get: 'ore', giveN: 1, getN: 1 },
     winPoints, friendlyRobber: !!friendlyRobber,
     id: Math.floor(rng() * 2 ** 31), // tells one game from the next (e.g. a rematch)
     events: [],
@@ -431,7 +439,7 @@ export function createGame({ randomize = true, autoSetup = true, rng = Math.rand
     g.phase = 'roll';
     g.setup = null;
     updateLongest(g);
-    log(g, 'Opening settlements placed in snake order.', 3);
+    log(g, 'Opening settlements placed in snake order.', firstPlayer);
     log(g, `${player(g, g.firstPlayer).name} to roll.`, firstPlayer);
   } else {
     log(g, `A new island is drawn. ${player(g, g.firstPlayer).name} places first.`, firstPlayer);
@@ -452,7 +460,7 @@ export function startRoll(s, rng = Math.random) {
 
 export function resolveRoll(s, dice, rng = Math.random) {
   if (s.phase !== 'roll' || s.winner !== null || isBlocking(s) || !Array.isArray(dice) || dice.length!==2 || dice.some(n=>!Number.isInteger(n)||n<1||n>6)) return s;
-  const g = clone(s);
+  const g = cloneGame(s);
   const sum = dice[0] + dice[1];
   const me = player(g, g.cur).name;
   g.rolling = false;
@@ -502,7 +510,7 @@ export function resolveRoll(s, dice, rng = Math.random) {
       if (n > 0) { flows.push({ hex: hid, p: t.p, res: r, n }); left[t.p][r] -= n; }
     }
   }
-  emit(g, 'produce', { flows });
+  if (flows.length) emit(g, 'produce', { flows });
   const describe = (gr) => RES.filter((r) => gr[r]).map((r) => `${gr[r]} ${RES_NAME[r]}`).join(', ');
   const personal = {};
   gains.forEach((gr, i) => { if (describe(gr)) personal[i] = `Rolled ${sum} — you collect ${describe(gr)}.`; });
@@ -516,13 +524,10 @@ export function resolveRoll(s, dice, rng = Math.random) {
 export function clearProducing(s) {
   return s.producing.length ? { ...s, producing: [], gains:[] } : s;
 }
-export function clearToast(s, id) {
-  return s.toast && s.toast.id === id ? { ...s, toast: null } : s;
-}
 
 export function endTurn(s) {
   if (s.phase !== 'main' || s.winner !== null || isBlocking(s) || s.rolling) return s;
-  const g = clone(s);
+  const g = cloneGame(s);
   if(g.playerCount>4 && !g.paired){g.cur=(g.lead+3)%g.playerCount;g.paired=true;g.phase='main';}
   else {g.lead=(g.lead+1)%g.playerCount;g.cur=g.lead;g.paired=false;g.phase='roll';}
   g.mode = null;
@@ -531,8 +536,11 @@ export function endTurn(s) {
   g.turn++;
   g.producing = [];
   g.gains=[];g.offer=null;checkWin(g);
-  if (g.winner === null) emit(g, 'turn', { p: g.cur });
-  toast(g, `${player(g, g.cur).name}’s turn${g.paired?' — actions only.':' — roll the dice.'}`);
+  if (g.winner !== null) toast(g, `${player(g, g.winner).name} wins!`); // won with hidden point cards at the start of their turn
+  else {
+    emit(g, 'turn', { p: g.cur });
+    toast(g, `${player(g, g.cur).name}’s turn${g.paired?' — actions only.':' — roll the dice.'}`);
+  }
   return g;
 }
 
@@ -558,15 +566,14 @@ function cancelUnaffordableBuild(g) {
 }
 
 export function chooseBuild(s, kind) {
-  if (s.winner !== null || s.phase === 'setup' || isBlocking(s) || s.rolling) return s;
-  const g = clone(s);
+  if (!['road', 'settlement', 'city'].includes(kind) || s.winner !== null || s.phase === 'setup' || isBlocking(s) || s.rolling) return s;
+  const g = cloneGame(s);
   const p = g.cur;
   if (g.mode === kind) {
     g.mode = null;
     g.freeRoads = 0;
     return g;
   }
-  if(!['road','settlement','city'].includes(kind)) return s;
   const noun = BUILD_NAME[kind].toLowerCase();
   if (g.phase !== 'main') return tell(g, p, 'Roll the dice before you build.'), g;
   if (!afford(g.players[p].res, COST[kind])) return tell(g, p, `A ${noun} costs ${costText(COST[kind])}.`), g;
@@ -582,10 +589,10 @@ export function chooseBuild(s, kind) {
 
 export function placeAtVertex(s, vid) {
   const p = s.cur;
-  if(s.winner!==null || s.rolling) return s;
+  if (!Number.isInteger(vid) || s.winner !== null || s.rolling) return s;
   if (s.phase === 'setup') {
     if (s.setup.need !== 'settlement' || !canSettle(s, vid, p, true)) return s;
-    const g = clone(s);
+    const g = cloneGame(s);
     placeTown(g, vid, p);
     emit(g, 'build', { p, kind: 'settlement', cost: {} });
     if (g.setup.step >= g.players.length) grantOpening(g, vid, p);
@@ -597,7 +604,7 @@ export function placeAtVertex(s, vid) {
     return g;
   }
   if (!['settlement', 'city'].includes(s.mode) || !canCompleteBuild(s, s.mode)) return s;
-  const g = clone(s);
+  const g = cloneGame(s);
   if (g.mode === 'settlement' && canSettle(g, vid, p, false)) {
     payBank(g,p,COST.settlement);
     placeTown(g, vid, p);
@@ -618,10 +625,10 @@ export function placeAtVertex(s, vid) {
 }
 
 export function placeAtEdge(s, eid) {
-  if(s.winner!==null || s.rolling) return s;
+  if (!Number.isInteger(eid) || s.winner !== null || s.rolling) return s;
   const p = s.cur;
   if (!canRoad(s, eid, p)) return s;
-  const g = clone(s);
+  const g = cloneGame(s);
   if (g.phase === 'setup') {
     placeRoad(g, eid, p);
     emit(g, 'build', { p, kind: 'road', cost: {} });
@@ -660,7 +667,7 @@ export function placeAtEdge(s, eid) {
 
 export function moveRobber(s, hid, rng = Math.random) {
   if (s.winner!==null || s.mode !== 'robber' || !robberTargets(s).includes(hid)) return s;
-  const g = clone(s);
+  const g = cloneGame(s);
   g.robber = hid;
   emit(g, 'robber', { p: g.cur, hex: hid });
   const n = g.numbers[hid];
@@ -685,7 +692,7 @@ export function moveRobber(s, hid, rng = Math.random) {
 
 export function stealFrom(s, victim, rng = Math.random) {
   if (s.mode !== 'steal' || !s.victims.includes(victim)) return s;
-  const g = clone(s);
+  const g = cloneGame(s);
   steal(g, victim, rng);
   g.mode = null;
   g.victims = [];
@@ -694,7 +701,7 @@ export function stealFrom(s, victim, rng = Math.random) {
 
 export function buyDevCard(s) {
   if (s.winner !== null || s.phase === 'setup' || isBlocking(s) || s.rolling) return s;
-  const g = clone(s);
+  const g = cloneGame(s);
   const p = g.cur;
   const pl = g.players[p];
   if (g.phase !== 'main') return tell(g, p, 'Roll the dice before you buy.'), g;
@@ -713,7 +720,7 @@ export function buyDevCard(s) {
 
 export function playDevCard(s, type) {
   if (!canPlayDev(s, type)) return s;
-  const g = clone(s);
+  const g = cloneGame(s);
   const p = g.cur;
   const pl = g.players[p];
   const name = player(g, p).name;
@@ -752,7 +759,7 @@ export function playDevCard(s, type) {
 export function pickResource(s, r) {
   if (s.winner!==null || !RES.includes(r) || (s.mode !== 'plenty' && s.mode !== 'monopoly')) return s;
   if(s.mode==='plenty' && s.bank[r]<=0) return s;
-  const g = clone(s);
+  const g = cloneGame(s);
   const p = g.cur;
   if (g.mode === 'plenty') {
     g.players[p].res[r]++;g.bank[r]--;
@@ -776,51 +783,16 @@ export function pickResource(s, r) {
   return g;
 }
 
-export function setTrade(s, patch) {
-  const trade = { ...s.trade, ...patch };
-  trade.giveN = Math.max(1, Math.min(9, trade.giveN));
-  trade.getN = Math.max(1, Math.min(9, trade.getN));
-  return { ...s, trade };
-}
-
-export function bankTrade(s) {
-  if (!bankTradeOk(s)) return s;
-  const g = clone(s);
+/** Trade with the bank (4:1, or better at a harbour). Returns `s` when not allowed. */
+export function bankTrade(s, give, get) {
+  if (!bankTradeOk(s, { give, get })) return s;
+  const g = cloneGame(s);
   const p = g.cur;
-  const { give, get } = g.trade;
   const ratio = harborRatio(g, p, give);
   g.players[p].res[give] -= ratio;g.bank[give]+=ratio;
   g.players[p].res[get] += 1;g.bank[get]--;
   emit(g, 'bank', { p, give: { [give]: ratio }, get: { [get]: 1 } });
   log(g, `${player(g, p).name} traded ${ratio} ${RES_NAME[give]} for 1 ${RES_NAME[get]}.`);
-  cancelUnaffordableBuild(g);
-  return g;
-}
-
-export function canAcceptOffer(s, q) {
-  const t = s.trade;
-  return (
-    Number.isInteger(q) && q>=0 && q<s.players.length && !s.paired && q !== s.cur &&
-    tradeOpen(s) &&
-    t.give !== t.get &&
-    s.players[s.cur].res[t.give] >= t.giveN &&
-    s.players[q].res[t.get] >= t.getN
-  );
-}
-
-export function acceptOffer(s, q) {
-  if (!canAcceptOffer(s, q)) return s;
-  const g = clone(s);
-  const { give, get, giveN, getN } = g.trade;
-  const a = g.players[g.cur].res;
-  const b = g.players[q].res;
-  a[give] -= giveN;
-  b[give] += giveN;
-  b[get] -= getN;
-  a[get] += getN;
-  emit(g, 'trade', { a: g.cur, b: q, aGives: { [give]: giveN }, bGives: { [get]: getN } });
-  toast(g, `${player(g, q).name} accepted your offer.`);
-  log(g, `${player(g, g.cur).name} traded with ${player(g, q).name}.`);
   cancelUnaffordableBuild(g);
   return g;
 }
@@ -836,10 +808,10 @@ export function discardCards(s,cards,who=s.discards?.[0]?.p){
   if(i<0)return s;
   const {p,n}=s.discards[i];
   if(totalCards(cards)!==n||!afford(s.players[p].res,cards))return s;
-  const g=clone(s);payBank(g,p,cards);emit(g,'discard',{p,cards:clone(cards)});g.discards.splice(i,1);g.mode=g.discards.length?'discard':'robber';
+  const g=cloneGame(s);payBank(g,p,cards);emit(g,'discard',{p,cards:clone(cards)});g.discards.splice(i,1);g.mode=g.discards.length?'discard':'robber';
   log(g,`${player(g, p).name} discarded ${n} cards.`,p);return g;
 }
-export function updateAwards(s){const g=clone(s);updateLongest(g);checkWin(g);return g;}
+export function updateAwards(s){const g=cloneGame(s);updateLongest(g);checkWin(g);return g;}
 export function canBuild(g,kind){
   if(!['road','settlement','city'].includes(kind)||g.phase!=='main'||g.winner!==null||g.rolling||isBlocking(g))return false;
   if(piecesLeft(g,g.cur)[kind]<=0||!afford(g.players[g.cur].res,COST[kind]))return false;
@@ -849,23 +821,24 @@ const validBasket=b=>!!b&&typeof b==='object'&&RES.every(r=>Number.isInteger(b[r
 export function validExchange(give,get){return validBasket(give)&&validBasket(get)&&totalCards(give)>0&&totalCards(get)>0&&RES.every(r=>!(give[r]&&get[r]));}
 export function proposeTrade(s,give,get){
   if(!tradeOpen(s)||s.paired||!validExchange(give,get)||!afford(s.players[s.cur].res,give))return s;
-  const g=clone(s);g.offer={give:clone(give),get:clone(get),responses:{}};emit(g,'offer',{p:g.cur});return g;
+  const g=cloneGame(s);g.offer={give:clone(give),get:clone(get),responses:{}};emit(g,'offer',{p:g.cur});return g;
 }
 export function respondTrade(s,p,accept){
   if(!s.offer||!tradeOpen(s)||s.paired||!Number.isInteger(p)||p===s.cur||!s.players[p])return s;
   if(accept&&!afford(s.players[p].res,s.offer.get))return s;
-  const g=clone(s);g.offer.responses[p]=accept?'accepted':'declined';return g;
+  const answer=accept?'accepted':'declined';if(s.offer.responses[p]===answer)return s; // the same answer again changes nothing
+  const g=cloneGame(s);g.offer.responses[p]=answer;return g;
 }
 export function counterTrade(s,p,give,get){
   if(!s.offer||!tradeOpen(s)||s.paired||!Number.isInteger(p)||p===s.cur||!s.players[p]||!validExchange(give,get)||!afford(s.players[p].res,get))return s;
-  const g=clone(s);g.offer.responses[p]={give:clone(give),get:clone(get)};return g;
+  const g=cloneGame(s);g.offer.responses[p]={give:clone(give),get:clone(get)};return g;
 }
 export function confirmTrade(s,p){
   if(!s.offer||!tradeOpen(s)||s.paired||!s.players[p]||p===s.cur)return s;
   const response=s.offer.responses[p];if(response!=='accepted'&&!(response&&typeof response==='object'))return s;
   const {give,get}=response==='accepted'?s.offer:response;
   if(!validExchange(give,get)||!afford(s.players[s.cur].res,give)||!afford(s.players[p].res,get))return s;
-  const g=clone(s);
+  const g=cloneGame(s);
   for(const r of RES){g.players[g.cur].res[r]+=get[r]-give[r];g.players[p].res[r]+=give[r]-get[r];}
   emit(g, 'trade', { a: g.cur, b: p, aGives: clone(give), bGives: clone(get) });
   g.offer=null;cancelUnaffordableBuild(g);log(g,`${player(g, g.cur).name} traded with ${player(g, p).name}.`);return g;
@@ -886,7 +859,7 @@ export function validSavedGame(g){
 /* ---------- helpers for online seats ---------- */
 /** The turn timer ran out for these seats; their moves were finished automatically. */
 export function noteTimeout(s, seats) {
-  const g = clone(s);
+  const g = cloneGame(s);
   const names = seats.map((p) => player(g, p).name).join(' and ');
   log(g, `${names} ran out of time.`, seats[0]);
   toast(g, `${names} ran out of time.`);
@@ -897,7 +870,7 @@ export const vertexValue = (g, vid) => vertexScore(g, vid); // how productive a 
 export const hexCorners = (g, hid) => geo(g).hexes[hid]?.verts || [];
 /** A spectator took over an empty seat. */
 export function noteTakeover(s, p, name) {
-  const g = clone(s);
+  const g = cloneGame(s);
   const colour = PLAYERS[g.seats?.[p]?.color ?? p].name;
   log(g, `${name} takes over the ${colour} seat.`, p);
   toast(g, `${name} takes over the ${colour} seat.`);

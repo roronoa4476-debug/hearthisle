@@ -5,9 +5,22 @@
 
 import { DEV_TYPES } from './rules.js';
 
-const reduced = () => globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+const motionQuery = globalThis.matchMedia?.('(prefers-reduced-motion: reduce)');
+const reduced = () => !!motionQuery?.matches;
 export const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const quietly = (promise) => promise.catch(() => {}); // a cancelled animation is not an error
+
+// Several effects often start together (cards landing on five places at once).
+// Each one measures the page straight away but adds its element a moment later,
+// in one batch, so the browser lays the page out once instead of once per effect.
+let writes = null;
+function later(write) {
+  if (!writes) {
+    writes = [];
+    queueMicrotask(() => { const batch = writes; writes = null; batch.forEach((w) => w()); });
+  }
+  return new Promise((resolve) => writes.push(() => resolve(write())));
+}
 
 /** The overlay animations are drawn in: 'fx' above the table, 'fx-top' above dialogs too. */
 function layer(id = 'fx') {
@@ -31,7 +44,6 @@ export function centre(target) {
   return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
 }
 
-/** A small card: a resource (`wood`, `ore`…), a development type, or 'back' for a hidden card. */
 /** Show a card as a resource, a development card type, or 'back' (face down). */
 function face(el, kind) {
   const back = kind === 'back';
@@ -113,15 +125,18 @@ export function halo(target, colour, { duration = 700, ring = 3, blur = 14 } = {
   if (!el || reduced()) return Promise.resolve();
   const r = el.getBoundingClientRect();
   if (!r.width || !r.height) return Promise.resolve();
-  const glowEl = document.createElement('span');
-  glowEl.className = 'fx-halo';
-  glowEl.style.setProperty('width', `${r.width}px`);
-  glowEl.style.setProperty('height', `${r.height}px`);
-  glowEl.style.setProperty('transform', `translate(${r.left}px, ${r.top}px)`);
-  glowEl.style.setProperty('border-radius', getComputedStyle(el).borderRadius);
-  glowEl.style.setProperty('box-shadow', `0 0 0 ${ring}px ${colour}, 0 0 ${blur}px ${ring}px ${colour}`);
-  layer().append(glowEl);
-  return quietly(glowEl.animate([{ opacity: 0 }, { opacity: 0.9, offset: 0.3 }, { opacity: 0 }], { duration, easing: 'ease-out' }).finished).then(() => glowEl.remove());
+  const radius = getComputedStyle(el).borderRadius;
+  return later(() => {
+    const glowEl = document.createElement('span');
+    glowEl.className = 'fx-halo';
+    glowEl.style.setProperty('width', `${r.width}px`);
+    glowEl.style.setProperty('height', `${r.height}px`);
+    glowEl.style.setProperty('transform', `translate(${r.left}px, ${r.top}px)`);
+    glowEl.style.setProperty('border-radius', radius);
+    glowEl.style.setProperty('box-shadow', `0 0 0 ${ring}px ${colour}, 0 0 ${blur}px ${ring}px ${colour}`);
+    layer().append(glowEl);
+    return quietly(glowEl.animate([{ opacity: 0 }, { opacity: 0.9, offset: 0.3 }, { opacity: 0 }], { duration, easing: 'ease-out' }).finished).then(() => glowEl.remove());
+  });
 }
 
 /** A quick reaction on an element (or a function that finds it): 'gain' (bump + green glow), 'lose' (dip + red), 'pop', 'nudge', 'tick'. */
@@ -141,19 +156,21 @@ export function react(target, kind = 'pop') {
 
 /** A small floating "+2" / "−1" chip that rises from an element and fades. */
 export function chip(target, text, good = true) {
-  const c = centre(target);
-  if (!c || reduced()) return Promise.resolve();
-  const el = document.createElement('span');
-  el.className = `fx-chip ${good ? 'good' : 'bad'}`;
-  el.textContent = text;
-  layer().append(el);
-  const at = (dy, s) => `translate(${c.x}px, ${c.y + dy}px) translate(-50%, -50%) scale(${s})`;
-  return el.animate([
-    { transform: at(4, 0.6), opacity: 0 },
-    { transform: at(-10, 1), opacity: 1, offset: 0.25 },
-    { transform: at(-26, 1), opacity: 1, offset: 0.75 },
-    { transform: at(-34, 0.95), opacity: 0 },
-  ], { duration: 1100, easing: 'ease-out' }).finished.catch(() => {}).then(() => el.remove());
+  const c = !reduced() && centre(target);
+  if (!c) return Promise.resolve();
+  return later(() => {
+    const el = document.createElement('span');
+    el.className = `fx-chip ${good ? 'good' : 'bad'}`;
+    el.textContent = text;
+    layer().append(el);
+    const at = (dy, s) => `translate(${c.x}px, ${c.y + dy}px) translate(-50%, -50%) scale(${s})`;
+    return quietly(el.animate([
+      { transform: at(4, 0.6), opacity: 0 },
+      { transform: at(-10, 1), opacity: 1, offset: 0.25 },
+      { transform: at(-26, 1), opacity: 1, offset: 0.75 },
+      { transform: at(-34, 0.95), opacity: 0 },
+    ], { duration: 1100, easing: 'ease-out' }).finished).then(() => el.remove());
+  });
 }
 
 /** A soft glow sweeping across an element (e.g. the player whose turn it is). */
@@ -200,17 +217,18 @@ export async function badge(text, from, to, { duration = 750 } = {}) {
   el.remove();
 }
 
-/** Flat confetti falling over an area, behind dialogs. */
-export function confetti(over = document.body, colours = ['#e0362c', '#1f6fe0', '#f5891c', '#2fa84a', '#8e44cf', '#f0b21b']) {
+/** Flat confetti falling over the screen, above dialogs so it stays bright. */
+export function confetti(colours = ['#e0362c', '#1f6fe0', '#f5891c', '#2fa84a', '#8e44cf', '#f0b21b']) {
   if (reduced()) return Promise.resolve();
-  const r = (over || document.body).getBoundingClientRect();
-  const host = layer('fx-top'); // above dialogs, so it stays bright
+  const r = { left: 0, top: 0, width: innerWidth, height: innerHeight }; // what you see, wherever the page is scrolled
+  const count = globalThis.matchMedia?.('(pointer: coarse)').matches ? 50 : 110; // fewer on phones
   const pieces = [];
-  for (let i = 0; i < 110; i++) {
+  const batch = document.createDocumentFragment();
+  for (let i = 0; i < count; i++) {
     const el = document.createElement('i');
     el.className = 'fx-confetti';
     el.style.setProperty('background', colours[i % colours.length]);
-    host.append(el);
+    batch.append(el);
     const x = r.left + Math.random() * r.width;
     const drift = (Math.random() - 0.5) * 160;
     const spin = (Math.random() - 0.5) * 720;
@@ -218,8 +236,9 @@ export function confetti(over = document.body, colours = ['#e0362c', '#1f6fe0', 
     pieces.push(el.animate([
       { transform: `translate(${x}px, ${r.top - 20}px) rotate(0deg)`, opacity: 1 },
       { transform: `translate(${x + drift}px, ${r.top + fall}px) rotate(${spin}deg)`, opacity: 0 },
-    ], { duration: 1800 + Math.random() * 1400, delay: Math.random() * 500, easing: 'cubic-bezier(.2,.6,.4,1)' }).finished.catch(() => {}).then(() => el.remove()));
+    ], { duration: 1800 + Math.random() * 1400, delay: Math.random() * 500, easing: 'cubic-bezier(.2,.6,.4,1)', fill: 'backwards' }).finished.catch(() => {}).then(() => el.remove()));
   }
+  layer('fx-top').append(batch);
   return Promise.all(pieces);
 }
 

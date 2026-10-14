@@ -28,7 +28,7 @@ function client() {
     history:{replaceState(_state, _title, url){location.search = new URL(url, 'http://localhost').search;}},
     localStorage:{getItem:k=>storage.get(k)??null, setItem:(k,v)=>storage.set(k,v), removeItem:k=>storage.delete(k), key:i=>[...storage.keys()][i], get length(){return storage.size;}},
     document:{getElementById:id=>{if(!elements.has(id))elements.set(id,element());return elements.get(id);}, addEventListener(){}, body:element()},
-    ResizeObserver:class{observe(){}}, getComputedStyle:()=>({paddingLeft:'0'}), WebSocket:Socket,
+    ResizeObserver:class{observe(){}}, addEventListener(){}, getComputedStyle:()=>({paddingLeft:'0'}), WebSocket:Socket,
     setTimeout:(fn, ms)=>{const id=++nextTimer;timers.set(id,{fn,ms});return id;}, clearTimeout:id=>timers.delete(id), setInterval(){},
     render(_game, handlers, ui, room){actions=handlers;state={...ui,room};},
   });
@@ -70,9 +70,10 @@ test('first typed room code after a failed invitation is used', () => {
   assert.equal(c.sockets[1].sent[0].room,'GOOD');c.sockets[1].message(roomMessage());assert.equal(c.state.room.code,'GOOD');
 });
 test('failed transport retries back off until a room is actually joined', () => {
-  const c=client();c.open();c.sockets[0].emit('close');assert.equal(c.tick(),600);
-  c.open();c.sockets[1].emit('close');assert.equal(c.tick(),1200);
-  c.open();c.sockets[2].message(roomMessage());c.sockets[2].emit('close');assert.equal(c.tick(),600);
+  const about=(ms,base)=>assert.ok(ms>=base*0.8&&ms<=base*1.2,`${ms} is about ${base}`); // retries are spread a little
+  const c=client();c.open();c.sockets[0].emit('close');about(c.tick(),600);
+  c.open();c.sockets[1].emit('close');about(c.tick(),1200);
+  c.open();c.sockets[2].message(roomMessage());c.sockets[2].emit('close');about(c.tick(),600);
 });
 test('explicit room choice cancels a pending retry and ignores the old socket', () => {
   const c=client();c.open();const old=c.sockets[0];old.emit('close');assert.equal(c.timers.size,1);

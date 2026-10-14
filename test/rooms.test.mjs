@@ -61,6 +61,8 @@ test('practice refills cannot bypass pending resolutions and practice survives r
   const restored = Rooms.restoreRoom(data);
   assert.equal(Rooms.viewFor(restored, tok(93)).room.practice, true);
   assert.ok(R.validSavedGame(restored.game));
+  assert.equal(Rooms.lobby(restored, tok(93), { type: 'practiceReset' }), false, 'nothing changes while the restored game waits for its players');
+  Rooms.connected(restored, tok(93), +1); // everyone is back, so play resumes
   assert.equal(Rooms.lobby(restored, tok(93), { type: 'practiceReset' }), true);
   assert.equal(restored.game.mode, null);
   assert.equal(restored.game.players[0].dev.length, 0);

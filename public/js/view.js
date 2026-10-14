@@ -11,6 +11,8 @@ const $ = (id) => document.getElementById(id);
 
 // Elements that got event handlers from h(). When one of these changes it is
 // replaced whole, so a button never keeps a handler made for older data.
+// (A button whose handler uses data must show that data in an attribute or
+// text, or an unchanged-looking button would keep its old handler.)
 const listened = new WeakSet();
 
 /** Element builder using DOM APIs only (no innerHTML), so it works under a strict CSP. */
@@ -44,6 +46,11 @@ function patch(parent, next) {
   next.forEach((n, i) => (old[i] ? patchNode(old[i], n) : parent.append(n)));
   for (let i = next.length; i < old.length; i++) old[i].remove();
 }
+function copyAttributes(a, b) {
+  for (const { name } of [...a.attributes]) if (!b.hasAttribute(name)) a.removeAttribute(name);
+  for (const { name, value } of b.attributes) if (a.getAttribute(name) !== value) a.setAttribute(name, value);
+  if (a !== document.activeElement && a.value !== b.value) a.value = b.value;
+}
 function sameAttributes(a, b) {
   if (a.attributes.length !== b.attributes.length) return false;
   for (const { name, value } of a.attributes) if (b.getAttribute(name) !== value) return false;
@@ -52,6 +59,10 @@ function sameAttributes(a, b) {
 function patchNode(a, b) {
   if (a.isEqualNode(b)) return;
   if (a.nodeType === 3 && b.nodeType === 3) { a.nodeValue = b.nodeValue; return; }
+  // A text box is kept, never replaced: replacing it while someone types breaks
+  // phone keyboards (autocorrect, predictions). Its handler only reports what
+  // was typed, so the old one stays right.
+  if (a.nodeName === 'INPUT' && b.nodeName === 'INPUT' && a.type === b.type) { copyAttributes(a, b); return; }
   if (a.nodeType !== 1 || a.nodeName !== b.nodeName || listened.has(b) || !sameAttributes(a, b)) { a.replaceWith(b); return; }
   patch(a, [...b.childNodes]);
 }
@@ -130,14 +141,17 @@ function buildBoard(g, root) {
   root.append(board.roadLayer, board.townLayer, board.robber, board.overlay);
 }
 
-function renderBoard(g, a, me) {
+function renderBoard(g, a, me, ui, room) {
   GEO = getGeometry(g.playerCount);
   const root = $('board');
   root.style.setProperty('--hex-w', `${(1.7320508 / GEO.width) * 100}%`);
   root.style.setProperty('--hex-h', `${(2 / GEO.height) * 100}%`);
   root.style.setProperty('--u', `${100 / GEO.width}cqw`);
   const key = `${g.playerCount}|${g.terrain.join()}|${g.numbers.join()}`;
-  if (board.key !== key || g.roadList.length < board.roads.size || g.townList.length < board.towns.size) {
+  // Pieces are only ever added during a game, so a missing one (a guessed move
+  // the server didn't make, or a new game) means drawing the board afresh.
+  const gone = [...board.roads.keys()].some((eid) => g.roads[eid] === undefined) || [...board.towns.keys()].some((vid) => !g.settlements[vid]);
+  if (board.key !== key || gone) {
     buildBoard(g, root);
     board.key = key;
   }
@@ -194,12 +208,8 @@ function renderBoard(g, a, me) {
     }
   }
   patch(board.overlay, hits);
-  $('notice').textContent = noticeFor(g, me);
-}
-
-// Notices are written for the acting player; other seats get a neutral version.
-function noticeFor(g) {
-  return g.toast?.text || '';
+  const notice = room && ui.status === 'connecting' ? 'Connection lost — reconnecting…' : g.toast?.text || '';
+  if ($('notice').textContent !== notice) $('notice').textContent = notice;
 }
 
 /* ---------- left column ---------- */
@@ -273,12 +283,11 @@ function waitingText(g, me) {
   return `Waiting for ${name(g.cur)}…`;
 }
 
-function renderTurn(g, a, me) {
+function renderTurn(g, a, me, ui) {
   const P = who(g.cur);
   const mine = me === g.cur && g.mode !== 'discard';
   const blocking = R.isBlocking(g);
   const sub = g.phase === 'setup' ? 'Opening placements' : g.playerCount > 4 ? `Turn ${g.turn} · ${g.paired ? 'Player 2 · actions, no roll' : 'Player 1 · roll + actions'}` : `Turn ${g.turn}`;
-  const rollPhase = g.phase === 'roll' || g.phase === 'setup';
   const mainBtn = g.phase === 'roll'
     ? btn('Roll dice', a.roll, { class: 'btn', disabled: !mine || g.rolling || blocking || g.winner !== null })
     : btn(g.paired ? 'Finish turn' : 'End turn', a.endTurn, { class: 'btn red', disabled: !mine || g.phase !== 'main' || g.rolling || blocking || g.winner !== null });
@@ -286,11 +295,11 @@ function renderTurn(g, a, me) {
   if (mine && g.mode === 'steal') extra.push(h('div', { class: 'choice-row' }, ...g.victims.map((q) => btn(`Take from ${name(q)}`, () => a.stealFrom(q), { class: 'btn small wood' }))));
   if (mine && !blocking && g.phase === 'main' && ['road', 'settlement', 'city'].includes(g.mode)) extra.push(btn('Cancel building (Esc)', a.cancelBuild, { class: 'linkish' }));
   patch($('turn'), [
-    h('div', { class: 'turn-head' }, playerMark(P), h('div', { class: 'turn-title' }, h('div', { class: 'turn-name', text: g.cur === me ? 'Your turn' : `${P.name}’s turn` }), h('div', { class: 'turn-sub', text: sub })), h('span', { id: 'turn-timer', class: 'timer', role: 'timer', 'aria-label': 'Time left this turn', hidden: true })),
+    h('div', { class: 'turn-head' }, playerMark(P), h('div', { class: 'turn-title' }, h('div', { class: 'turn-name', text: g.cur === me ? 'Your turn' : `${P.name}’s turn` }), h('div', { class: 'turn-sub', text: sub })), h('span', { id: 'turn-timer', class: `timer${ui.timer?.urgent ? ' urgent' : ''}`, role: 'timer', 'aria-label': 'Time left this turn', hidden: !ui.timer, text: ui.timer?.text })),
     h('p', { class: `prompt well${mine && !RESTORING ? ' mine' : ''}`, text: RESTORING ? 'The server restarted. Restoring the game while everyone reconnects…' : mine ? R.prompt(g) : waitingText(g, me) }),
     h('div', { class: 'turn-row' },
       h('div', { class: `dice${g.rolling ? ' rolling' : ''}`, role: 'img', 'aria-label': `Dice show ${g.dice[0]} and ${g.dice[1]}` }, ...g.dice.map((n, i) => h('span', { class: `die${i ? ' red' : ''}` }, ...Array.from({ length: 9 }, (_, k) => h('i', { class: FACES[n].includes(k) ? 'on' : '' }))))),
-      rollPhase && g.phase === 'setup' ? h('span', { class: 'muted', text: 'Place on the board' }) : mainBtn,
+      g.phase === 'setup' ? h('span', { class: 'muted', text: 'Place on the board' }) : mainBtn,
     ),
     ...extra,
   ]);
@@ -657,7 +666,7 @@ function renderModal(g, a, ui, me, room) {
   // Patching keeps an open dialog (and where it is scrolled to) in place across updates.
   patch($('modal-root'), el ? [el] : []);
   // The header (sound and menu buttons) stays usable while a dialog is open.
-  for (const id of ['players', 'bank', 'log', 'right', 'table', 'dock']) $(id).inert = !!el;
+  for (const id of ['players', 'bank', 'log', 'right', 'table', 'dock']) if ($(id).inert !== !!el) $(id).inert = !!el;
 }
 
 export function render(g, a, ui, room) {
@@ -665,22 +674,23 @@ export function render(g, a, ui, room) {
   RESTORING = !!room?.restoring;
   const me = room?.you && room.you.seat >= 0 ? room.you.seat : null;
   const active = document.activeElement;
-  const focused = active?.getAttribute('aria-label');
-  const caret = active?.tagName === 'INPUT' ? active.selectionStart : null;
-  renderBoard(g, a, me);
+  const dialogBefore = document.querySelector('[role=dialog]');
+  renderBoard(g, a, me, ui, room);
   renderPlayers(g, a, ui, me, room);
   renderBank(g);
   renderLog(g);
-  renderTurn(g, a, me);
+  renderTurn(g, a, me, ui);
   renderTrade(g, a, ui, me);
   renderDevs(g, a, ui, me);
   renderDock(g, a, me);
   renderModal(g, a, ui, me, room);
-  if (focused) {
-    const target = [...document.querySelectorAll('button[aria-label], input[aria-label]')].find((e) => e.getAttribute('aria-label') === focused && !e.disabled);
-    target?.focus({ preventScroll: true });
-    if (target && caret !== null) target.setSelectionRange(caret, caret);
+  // Unchanged elements keep their focus. If the focused button itself was
+  // replaced, focus its replacement (the one with the same label).
+  const label = active?.getAttribute?.('aria-label');
+  if (label && active !== document.body && !active.isConnected) {
+    [...document.querySelectorAll('button[aria-label], input[aria-label]')].find((e) => e.getAttribute('aria-label') === label && !e.disabled)?.focus({ preventScroll: true });
   }
+  // A dialog that just opened takes the keyboard focus.
   const dialog = document.querySelector('[role=dialog]');
-  if (dialog && !dialog.contains(document.activeElement)) dialog.querySelector('input, button:not(:disabled)')?.focus({ preventScroll: true });
+  if (dialog && dialog !== dialogBefore && !dialog.contains(document.activeElement)) dialog.querySelector('input, button:not(:disabled)')?.focus({ preventScroll: true });
 }

@@ -1,6 +1,6 @@
 {
   "name": "koolkatan",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "private": true,
   "type": "module",
   "description": "Koolkatan: an island board game for 3–6 players with free online rooms.",

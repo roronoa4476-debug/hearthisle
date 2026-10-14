@@ -21,6 +21,12 @@ export function createSound({ muted = false } = {}) {
   }
   // Touch screens only count a finished tap as permission to play sound, so listen to all of these.
   for (const type of ['pointerdown', 'pointerup', 'touchend', 'click', 'keydown']) globalThis.addEventListener?.(type, unlock, { passive: true });
+  // Rest the audio while the tab is hidden (saves a phone's battery); pick up again when it's back.
+  globalThis.document?.addEventListener('visibilitychange', () => {
+    if (!ctx) return;
+    if (document.hidden) ctx.suspend().catch(() => {});
+    else ctx.resume().catch(() => {});
+  });
 
   const ready = () => ctx && !isMuted && ctx.state === 'running';
 
@@ -40,13 +46,26 @@ export function createSound({ muted = false } = {}) {
     osc.stop(t + length + 0.02);
   }
 
-  /** A burst of filtered noise: dice, cards, wooden knocks. */
-  function noise({ at = 0, length = 0.06, volume = 0.35, freq = 1800, q = 1.2, filter: kind = 'bandpass' } = {}) {
-    const t = ctx.currentTime + at;
+  // Fading noise bursts, made once per length and reused (a dice roll needs
+  // about twenty). A few different ones per length keep repeats from sounding alike.
+  const bursts = new Map();
+  const BURST_VARIANTS = 6;
+  function burst(length) {
     const frames = Math.max(1, Math.floor(ctx.sampleRate * length));
+    let list = bursts.get(frames);
+    if (!list) bursts.set(frames, (list = []));
+    if (list.length >= BURST_VARIANTS) return list[Math.floor(Math.random() * list.length)];
     const buffer = ctx.createBuffer(1, frames, ctx.sampleRate);
     const data = buffer.getChannelData(0);
     for (let i = 0; i < frames; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / frames) ** 2;
+    list.push(buffer);
+    return buffer;
+  }
+
+  /** A burst of filtered noise: dice, cards, wooden knocks. */
+  function noise({ at = 0, length = 0.06, volume = 0.35, freq = 1800, q = 1.2, filter: kind = 'bandpass' } = {}) {
+    const t = ctx.currentTime + at;
+    const buffer = burst(length);
     const src = ctx.createBufferSource();
     const filter = ctx.createBiquadFilter();
     const gain = ctx.createGain();

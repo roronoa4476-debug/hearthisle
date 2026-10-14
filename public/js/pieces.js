@@ -2,7 +2,6 @@
 // Artwork only: no game rules here. Built with DOM APIs (CSP-safe).
 
 const NS = 'http://www.w3.org/2000/svg';
-let uid = 0;
 
 export function svg(tag, attrs = {}, ...children) {
   const el = document.createElementNS(NS, tag);
@@ -20,6 +19,25 @@ const MARKS = {
   star: () => svg('path', { d: 'M0-4.6L1.3-1.5 4.5-1.4 2-0.6 2.8 3.9 0 2.1-2.8 3.9-2-0.6-4.5-1.4-1.3-1.5Z' }),
   cross: () => svg('path', { d: 'M-1.4-4.4H1.4V-1.4H4.4V1.4H1.4V4.4H-1.4V1.4H-4.4V-1.4H-1.4Z' }),
 };
+
+// The outlines the wood grain is clipped to, defined once for the whole page.
+// (Fresh ids per drawing made every redraw of the build buttons look like a
+// change, so the buttons were rebuilt on each update.)
+const SETTLEMENT = 'M4 21L20 7 36 21V41H4Z';
+const CITY = 'M3 43V20L13 9 23 20V25L40 25 50 16 60 25V43Z';
+let defined = false;
+function clip(id) {
+  if (!defined && globalThis.document?.body) {
+    defined = true;
+    document.body.append(svg('svg', { class: 'svg-defs', 'aria-hidden': 'true', width: 0, height: 0 },
+      svg('defs', {},
+        svg('clipPath', { id: 'clip-settlement' }, svg('path', { d: SETTLEMENT })),
+        svg('clipPath', { id: 'clip-city' }, svg('path', { d: CITY })),
+        svg('clipPath', { id: 'clip-road' }, svg('rect', { x: 1, y: 1, width: 58, height: 10, rx: 2.4 })),
+      )));
+  }
+  return id;
+}
 
 /** Fine wood-grain overlay, clipped to a shape. */
 function grain(id, w, h) {
@@ -41,10 +59,9 @@ export function playerMark(player, size = 16) {
 }
 
 export function settlementArt(player) {
-  const id = `s${++uid}`;
-  const body = 'M4 21L20 7 36 21V41H4Z';
+  const id = clip('clip-settlement');
+  const body = SETTLEMENT;
   return svg('svg', { viewBox: '0 0 40 44', class: 'piece-art', 'aria-hidden': 'true' },
-    svg('defs', {}, svg('clipPath', { id }, svg('path', { d: body }))),
     svg('rect', { x: 27, y: 6, width: 5, height: 10, fill: player.color, stroke: player.edge, 'stroke-width': 1.3 }),
     svg('rect', { x: 27, y: 6, width: 5, height: 2, fill: '#000', opacity: 0.2 }),
     svg('path', { d: body, fill: player.color }),
@@ -62,10 +79,9 @@ export function settlementArt(player) {
 }
 
 export function cityArt(player) {
-  const id = `c${++uid}`;
-  const outline = 'M3 43V20L13 9 23 20V25L40 25 50 16 60 25V43Z';
+  const id = clip('clip-city');
+  const outline = CITY;
   return svg('svg', { viewBox: '0 0 62 46', class: 'piece-art', 'aria-hidden': 'true' },
-    svg('defs', {}, svg('clipPath', { id }, svg('path', { d: outline }))),
     svg('path', { d: outline, fill: player.color }),
     svg('path', { d: 'M13 9L23 20V43H13ZM50 16L60 25V43H50Z', fill: '#000', opacity: 0.14 }),
     grain(id, 62, 46),
@@ -83,9 +99,8 @@ export function cityArt(player) {
 }
 
 export function roadArt(player) {
-  const id = `r${++uid}`;
+  const id = clip('clip-road');
   return svg('svg', { viewBox: '0 0 60 12', preserveAspectRatio: 'none', class: 'piece-art', 'aria-hidden': 'true' },
-    svg('defs', {}, svg('clipPath', { id }, svg('rect', { x: 1, y: 1, width: 58, height: 10, rx: 2.4 }))),
     svg('rect', { x: 1, y: 1, width: 58, height: 10, rx: 2.4, fill: player.color }),
     grain(id, 60, 12),
     svg('rect', { x: 1, y: 6.5, width: 58, height: 4.5, fill: '#000', opacity: 0.14, 'clip-path': `url(#${id})` }),

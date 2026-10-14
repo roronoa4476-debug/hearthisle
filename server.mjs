@@ -82,9 +82,11 @@ export function createApp() {
         res.writeHead(304, headers).end();
         return;
       }
-      const body = await readFile(file);
-      res.writeHead(200, headers);
-      res.end(req.method === 'HEAD' ? undefined : body);
+      if (req.method === 'HEAD') {
+        res.writeHead(200, { ...headers, 'Content-Length': info.size }).end();
+        return;
+      }
+      res.writeHead(200, headers).end(await readFile(file));
     } catch {
       res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }).end('Not found');
     }
@@ -94,23 +96,34 @@ export function createApp() {
 }
 
 /* ---------- WebSocket rooms ---------- */
+const MAX_SOCKETS_PER_IP = 24; // plenty for a family on one connection, not enough to fill the server
+
+/** The visitor's address. On Render, Cloudflare in front of the server sets this header. */
+const addressOf = (req) => String(req.headers['cf-connecting-ip'] || req.socket.remoteAddress || '');
+
 function attachRooms(server) {
   // Updates are JSON and compress well, so messages over 1 KB are deflated.
   const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 512 * 1024, perMessageDeflate: { threshold: 1024 } });
   server.wss = wss;
-  const sockets = new Map(); // room code -> Set of { ws, token }
+  const sockets = new Map(); // room code -> Set of { ws, token, backupVersion }
+  const perAddress = new Map(); // visitor address -> open sockets
 
   const send = (ws, msg) => {
     if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(msg));
   };
+  // Several changes in one moment (a move, then a bot's reply) go out as one update.
+  const pending = new Set();
   const broadcast = (room) => {
-    let snapshot = null;
-    try {
-      snapshot = seal(Rooms.snapshotOf(room));
-    } catch (err) {
-      console.error('snapshot failed', err);
-    }
-    const set = sockets.get(room.code) || new Set();
+    if (pending.has(room)) return;
+    pending.add(room);
+    queueMicrotask(() => {
+      pending.delete(room);
+      sendUpdate(room);
+    });
+  };
+  const sendUpdate = (room) => {
+    const set = sockets.get(room.code);
+    if (!set) return;
     for (const c of set) {
       try {
         if (!room.members.has(c.token)) {
@@ -120,17 +133,62 @@ function attachRooms(server) {
           c.ws.close();
           continue;
         }
-        send(c.ws, { ...Rooms.viewFor(room, c.token), snapshot });
+        send(c.ws, Rooms.viewFor(room, c.token));
       } catch (err) {
         console.error('send failed', err);
       }
     }
+    scheduleBackups(room);
+  };
+  // The sealed backup lets players bring the room back after a server restart.
+  // It is sent on its own, only to players, and at most every couple of
+  // seconds (always ending with the latest version), not with every update.
+  const BACKUP_EVERY_MS = 2000;
+  const backups = new Map(); // room code -> { timer, at }
+  const scheduleBackups = (room) => {
+    const state = backups.get(room.code) || { timer: null, at: 0 };
+    backups.set(room.code, state);
+    if (state.timer) return;
+    state.timer = setTimeout(() => {
+      state.timer = null;
+      state.at = Date.now();
+      const set = sockets.get(room.code);
+      if (!set) return backups.delete(room.code);
+      let backup; // sealed once, and only if someone's copy is out of date
+      for (const c of set) {
+        const player = Rooms.seatOf(room, c.token) >= 0 || room.members.get(c.token)?.role === 'player';
+        if (!player || c.backupVersion === room.version) continue;
+        backup ??= sealed(room);
+        if (!backup) return;
+        send(c.ws, { type: 'backup', code: room.code, version: room.version, snapshot: backup });
+        c.backupVersion = room.version;
+      }
+    }, Math.max(0, state.at + BACKUP_EVERY_MS - Date.now()));
+    state.timer.unref?.();
+  };
+  const sealed = (room) => {
+    try {
+      return seal(Rooms.snapshotOf(room));
+    } catch (err) {
+      console.error('snapshot failed', err);
+      return null;
+    }
   };
 
-  wss.on('connection', (ws) => {
+  wss.on('connection', (ws, req) => {
+    const address = addressOf(req);
+    const open = (perAddress.get(address) || 0) + 1;
+    perAddress.set(address, open);
+    ws.on('close', () => (perAddress.get(address) > 1 ? perAddress.set(address, perAddress.get(address) - 1) : perAddress.delete(address)));
+    if (open > MAX_SOCKETS_PER_IP) {
+      ws.close(1008, 'Too many connections');
+      return;
+    }
     let room = null;
     let token = null;
-    let budget = 40; // simple flood protection: messages per 5 seconds
+    // simple flood protection: 40 messages per 5 seconds
+    let budget = 40;
+    let budgetAt = Date.now();
     let lastAction = '';
     let lastActionAt = 0;
     ws.isAlive = true;
@@ -144,6 +202,10 @@ function attachRooms(server) {
       }
     });
     const handle = (data) => {
+      if (Date.now() - budgetAt > 5000) {
+        budget = 40;
+        budgetAt = Date.now();
+      }
       if (--budget < 0) return;
       let msg;
       try {
@@ -188,15 +250,16 @@ function attachRooms(server) {
         Rooms.connected(room, token, +1);
         return;
       }
-      if (!room || msg.type === 'ping') return; // keep-alive from the browser
+      if (msg.type === 'ping') return send(ws, { type: 'pong' }); // the browser checking its connection still works
+      if (!room) return;
       if (msg.type === 'history') return send(ws, { type: 'history', log: Rooms.historyFor(room) }); // the full move list, on request
       if (msg.type === 'action') {
         // Ignore an exact repeat within a moment (a double-click must not trade twice).
         const key = JSON.stringify([msg.name, msg.args]);
-        if (key === lastAction && Date.now() - lastActionAt < 400) return;
+        const repeat = key === lastAction && Date.now() - lastActionAt < 400;
         lastAction = key;
         lastActionAt = Date.now();
-        const accepted = Rooms.act(room, token, String(msg.name), Array.isArray(msg.args) ? msg.args : []);
+        const accepted = !repeat && Rooms.act(room, token, String(msg.name), Array.isArray(msg.args) ? msg.args : []);
         // the browser may already show the move (it predicts certain moves); if it was
         // refused, send this player the real table so their screen snaps back
         if (!accepted) send(ws, { ...Rooms.viewFor(room, token), refused: true });
@@ -205,12 +268,11 @@ function attachRooms(server) {
       }
     };
 
-    const refill = setInterval(() => (budget = 40), 5000);
     ws.on('close', () => {
-      clearInterval(refill);
       if (!room) return;
       const set = sockets.get(room.code);
       if (set) for (const c of set) if (c.ws === ws) set.delete(c);
+      if (set && !set.size) sockets.delete(room.code);
       Rooms.connected(room, token, -1);
     });
   });

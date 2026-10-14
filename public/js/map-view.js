@@ -55,7 +55,8 @@ export function createMapView({ table, frame, viewport, board, zoomIn, zoomOut, 
   function moving() {
     viewport.classList.add('moving');
     clearTimeout(settle);
-    settle = setTimeout(() => viewport.classList.remove('moving'), 160);
+    // keep the ready-made picture while a finger is still down, even if it pauses
+    settle = setTimeout(() => { if (!drag && !pinch) viewport.classList.remove('moving'); }, 160);
   }
   function zoomTo(zoom, anchor = { x: 0, y: 0 }) {
     view = zoomAt(view, zoom, anchor, size);
@@ -97,7 +98,7 @@ export function createMapView({ table, frame, viewport, board, zoomIn, zoomOut, 
       touches.set(event.pointerId, { x: event.clientX, y: event.clientY });
       if (touches.size === 2) {
         const [a, b] = [...touches.values()];
-        pinch = { dist: Math.hypot(a.x - b.x, a.y - b.y) || 1, zoom: view.zoom };
+        pinch = { dist: Math.hypot(a.x - b.x, a.y - b.y) || 1, zoom: view.zoom, rect: viewport.getBoundingClientRect() };
         if (drag && viewport.hasPointerCapture(drag.id)) viewport.releasePointerCapture(drag.id);
         drag = null; // two fingers zoom instead of dragging
         viewport.classList.remove('dragging');
@@ -113,7 +114,7 @@ export function createMapView({ table, frame, viewport, board, zoomIn, zoomOut, 
     if (touches.has(event.pointerId)) touches.set(event.pointerId, { x: event.clientX, y: event.clientY });
     if (pinch && touches.size === 2) {
       const [a, b] = [...touches.values()];
-      zoomTo(pinch.zoom * (Math.hypot(a.x - b.x, a.y - b.y) / pinch.dist), center(viewport.getBoundingClientRect(), a, b));
+      zoomTo(pinch.zoom * (Math.hypot(a.x - b.x, a.y - b.y) / pinch.dist), center(pinch.rect, a, b));
       return;
     }
     if (!drag || event.pointerId !== drag.id) return;
@@ -124,10 +125,14 @@ export function createMapView({ table, frame, viewport, board, zoomIn, zoomOut, 
   });
   function endDrag(event) {
     touches.delete(event.pointerId);
-    if (touches.size < 2) pinch = null;
+    if (touches.size < 2 && pinch) {
+      pinch = null;
+      moving(); // lets the picture sharpen once the fingers are off
+    }
     if (!drag || event.pointerId !== drag.id) return;
     drag = null;
     viewport.classList.remove('dragging');
+    moving();
     if (viewport.hasPointerCapture(event.pointerId)) viewport.releasePointerCapture(event.pointerId);
   }
   viewport.addEventListener('pointerup', endDrag);
@@ -135,6 +140,7 @@ export function createMapView({ table, frame, viewport, board, zoomIn, zoomOut, 
   viewport.addEventListener('lostpointercapture', endDrag);
 
   return {
+    /** Fit the map to the table. Measures the page, so call it only when a size or the board changed. */
     resize(ratio, key) {
       const padding = parseFloat(getComputedStyle(frame).paddingLeft) * 2;
       const fitted = fitMap(table.clientWidth, table.clientHeight, padding, ratio);

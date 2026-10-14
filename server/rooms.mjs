@@ -12,6 +12,9 @@ const MAX_SEATS = 6; // one per colour
 const MAX_ROOMS = 500; // protects a small free server from someone spamming new rooms
 const RESTORE_HOLD_MS = 8000; // after a restart, wait for everyone's backups before play resumes
 const BACKUP_MAX_AGE_MS = 3 * 24 * 60 * 60 * 1000;
+const IDLE_GAME_MS = 6 * 60 * 60 * 1000; // an empty room is forgotten after this long (its players' backups can bring it back)
+const IDLE_LOBBY_MS = 10 * 60 * 1000; // ...or this long if no game has started
+const AWAY_SPECTATOR_MS = 30 * 60 * 1000; // spectators gone this long give their place in the room back
 const ROLL_MS = 550;
 const PRODUCE_MS = 2200;
 const LOG_SENT = 30; // recent moves included in every update
@@ -143,7 +146,8 @@ function startPractice(room, token) {
   ] });
   // The first action phase is ready to try; subsequent turns use ordinary dice/rules.
   room.game.phase = 'main';
-  room.game.log[0] = { ...room.game.log[0], text: 'Solo practice ready: build, trade with the bank, or try a development card.' };
+  const [first, ...rest] = room.game.log;
+  room.game = { ...room.game, log: [{ ...first, text: 'Solo practice ready: build, trade with the bank, or try a development card.' }, ...rest] };
   stockPractice(room);
 }
 
@@ -179,7 +183,9 @@ export function holding(room) {
 /* ---------- lobby ---------- */
 export function lobby(room, token, msg) {
   const m = room.members.get(token);
-  if (!m) return false;
+  // Nothing changes while a restored game waits for everyone's backups:
+  // a change here would stop a newer backup from replacing an older one.
+  if (!m || holding(room)) return false;
   const isHost = room.hostToken === token;
   switch (msg.type) {
     case 'practiceRefill':
@@ -191,13 +197,14 @@ export function lobby(room, token, msg) {
       stopTimers(room);
       startPractice(room, token);
       break;
-    case 'setName':
-      m.name = cleanName(msg.name);
-      if (room.game) {
-        const s = seatOf(room, token);
-        if (s >= 0) room.game.seats[s].name = m.name;
-      }
+    case 'setName': {
+      const name = cleanName(msg.name);
+      if (name === m.name) return false;
+      m.name = name;
+      const s = room.game ? seatOf(room, token) : -1;
+      if (s >= 0) room.game = { ...room.game, seats: room.game.seats.map((x, i) => (i === s ? { ...x, name } : x)) };
       break;
+    }
     case 'pickColor': {
       if (room.phase !== 'lobby' || !isInt(msg.color, 0, 5)) return false;
       const holder = seated(room).find((o) => o !== m && o.color === msg.color);
@@ -337,13 +344,7 @@ export function act(room, token, name, args = []) {
         case 'buyDevCard': next = R.buyDevCard(g); break;
         case 'playDevCard': if (!R.DEV_TYPES.includes(a)) return false; next = R.playDevCard(g, a); break;
         case 'pickResource': if (!R.RES.includes(a)) return false; next = R.pickResource(g, a); break;
-        case 'bankTrade': { // the resource choice lives in the browser and comes with the trade
-          if (!R.RES.includes(a) || !R.RES.includes(b)) return false;
-          const prepared = R.setTrade(g, { give: a, get: b });
-          const traded = R.bankTrade(prepared);
-          next = traded === prepared ? g : traded; // a refused trade changes nothing
-          break;
-        }
+        case 'bankTrade': next = R.bankTrade(g, a, b); break; // the resource choice lives in the browser and comes with the trade
         case 'propose': next = R.proposeTrade(g, basket(a), basket(b)); break;
         case 'confirm': if (!Number.isInteger(a)) return false; next = R.confirmTrade(g, a); break;
         case 'withdraw': next = R.withdrawTrade(g); break;
@@ -362,7 +363,6 @@ export function act(room, token, name, args = []) {
 }
 
 /* ---------- autopilot for seats whose player was removed ---------- */
-const pipScore = (g, vid) => R.vertexValue(g, vid);
 // Setup placements and turns each get their own key, used by the turn timer.
 const turnKey = (g) => (g.phase === 'setup' ? `s${g.setup.step}` : `t${g.turn}`);
 
@@ -389,7 +389,7 @@ export function autopilot(room, forced = new Set()) {
       next = R.withdrawTrade(g);
     } else if (g.phase === 'setup') {
       if (g.setup.need === 'settlement') {
-        const best = R.validVertices(g).sort((a, b) => pipScore(g, b) - pipScore(g, a))[0];
+        const best = R.validVertices(g).sort((a, b) => R.vertexValue(g, b) - R.vertexValue(g, a))[0];
         next = R.placeAtVertex(g, best);
       } else {
         next = R.placeAtEdge(g, R.validEdges(g)[0]);
@@ -486,25 +486,28 @@ function waitingOn(room) {
   return people.filter((p) => room.seatTokens[p] !== null && !isBotSeat(room, p));
 }
 
+// Like bots, the clock only runs while someone is connected: an abandoned
+// game must not play itself turn after turn and never be swept.
 function scheduleTurnTimer(room) {
   const seconds = room.options.turnTimer;
   const people = waitingOn(room);
-  const key = seconds && people.length ? `${turnKey(room.game)}|${room.game.mode === 'discard' ? 'd' : ''}` : null;
+  const key = seconds && people.length && someoneConnected(room) ? `${turnKey(room.game)}|${room.game.mode === 'discard' ? 'd' : ''}` : null;
   if (!key) room.deadline = null;
   if (key === room.timerKey) return;
   room.timerKey = key;
   clearTimeout(room.timers.turn);
   room.deadline = key ? Date.now() + seconds * 1000 : null;
   if (!key) return;
-  room.timers.turn = setTimeout(() => {
+  const expire = () => {
     if (room.timerKey !== key) return;
     try {
       if (expireTurn(room)) changed(room);
-      else { room.timerKey = null; room.deadline = null; } // mid-roll or restoring: restart the clock on the next update
+      else room.timers.turn = setTimeout(expire, 500); // mid-roll or restoring: try again in a moment
     } catch (err) {
       console.error('turn timer failed', err);
     }
-  }, seconds * 1000 + 250);
+  };
+  room.timers.turn = setTimeout(expire, seconds * 1000 + 250);
   room.timers.turn.unref?.();
 }
 
@@ -526,27 +529,37 @@ function randomCards(res, n) {
   return out;
 }
 
+/** Run a timer's work; if it fails, log it and never leave the dice stuck mid-roll. */
+function safely(room, work) {
+  try {
+    work();
+  } catch (err) {
+    console.error('room timer failed', err);
+    if (room.game?.rolling) room.game = { ...room.game, rolling: false };
+  }
+}
+
 function roll(room) {
   const started = R.startRoll(room.game, secureRandom);
   if (started === room.game) return false;
   room.game = started;
   changed(room);
   clearTimeout(room.timers.roll);
-  room.timers.roll = setTimeout(() => {
+  room.timers.roll = setTimeout(() => safely(room, () => {
     if (!room.game?.rolling) return;
     room.game = R.resolveRoll(room.game, room.game.dice, secureRandom);
     autopilot(room);
     changed(room);
     clearTimeout(room.timers.produce);
-    room.timers.produce = setTimeout(() => {
+    room.timers.produce = setTimeout(() => safely(room, () => {
       if (!room.game) return;
       const cleared = R.clearProducing(room.game);
       if (cleared !== room.game) {
         room.game = cleared;
         changed(room, false);
       }
-    }, PRODUCE_MS);
-  }, ROLL_MS);
+    }), PRODUCE_MS);
+  }), ROLL_MS);
   return true;
 }
 
@@ -613,19 +626,24 @@ export function connected(room, token, delta) {
   const m = room.members.get(token);
   if (!m) return;
   m.connected = Math.max(0, m.connected + delta);
+  if (!m.connected) m.leftAt = Date.now();
   // The host never changes: whoever created the room stays host, even while
   // they refresh or drop out. Their seat and host role wait for them.
   changed(room, false);
 }
 
-/** Forget rooms nobody has touched for a while. */
-export function sweep(maxIdleMs = 6 * 60 * 60 * 1000) {
-  const now = Date.now();
+/** Forget rooms nobody has touched for a while, and spectators who left long ago. */
+export function sweep(now = Date.now()) {
   for (const [code, room] of rooms) {
     const someoneHere = [...room.members.values()].some((m) => m.connected > 0);
-    if (!someoneHere && now - room.touched > maxIdleMs) {
+    if (!someoneHere && now - room.touched > (room.game ? IDLE_GAME_MS : IDLE_LOBBY_MS)) {
       stopTimers(room);
       rooms.delete(code);
+      continue;
+    }
+    for (const [token, m] of room.members) {
+      const away = !m.bot && !m.connected && m.role === 'spectator' && token !== room.hostToken && !room.seatTokens.includes(token);
+      if (away && now - (m.leftAt ?? m.joined) > AWAY_SPECTATOR_MS) room.members.delete(token);
     }
   }
 }
@@ -655,7 +673,7 @@ export function restoreRoom(data) {
   const existing = rooms.get(data.code);
   // A running room is the truth, unless it was itself restored from a backup
   // and nobody has played since: then a newer backup replaces it.
-  if (existing && !(existing.restoredFrom !== undefined && !existing.playedSinceRestore && data.version > existing.version)) return existing;
+  if (existing && !(existing.restoredFrom !== undefined && (holding(existing) || !existing.playedSinceRestore) && data.version > existing.version)) return existing;
   if (data.game && !R.validSavedGame(data.game)) return existing || null;
   const live = existing ? existing.members : new Map(); // keep counts for people already reconnected
   const room = existing || createRoomWithCode(data.code);
@@ -673,7 +691,7 @@ export function restoreRoom(data) {
   room.playedSinceRestore = false;
   room.holdUntil = room.phase === 'game' ? Date.now() + RESTORE_HOLD_MS : 0;
   clearTimeout(room.timers.hold);
-  if (room.holdUntil) room.timers.hold = setTimeout(() => changed(room, false), RESTORE_HOLD_MS + 100).unref(); // tell everyone play has resumed
+  if (room.holdUntil) room.timers.hold = setTimeout(() => safely(room, () => changed(room, false)), RESTORE_HOLD_MS + 100).unref(); // tell everyone play has resumed
   if (room.game) {
     // Finish anything that was mid-animation when the server stopped.
     if (room.game.rolling) room.game = R.resolveRoll({ ...room.game, rolling: false }, room.game.dice, secureRandom);

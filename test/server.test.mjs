@@ -89,3 +89,41 @@ test('a moved server forwards pages (with invite codes) to its new address but s
     await new Promise((r) => server.close(r));
   }
 });
+
+test('backups travel separately, only to players and only when the room changed; pings are answered; a quick repeat is refused, not lost', async () => {
+  const server = createApp();
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const { port } = server.address();
+  try {
+    const c = await connect(port);
+    c.send({ type: 'hello', token: tok(8), name: 'Tester', practice: true });
+    const first = await c.next((m) => m.type === 'room' && m.game);
+    assert.equal('snapshot' in first, false, 'updates carry no backup');
+    const backup = await c.next((m) => m.type === 'backup');
+    assert.equal(backup.code, first.room.code);
+    assert.equal(typeof backup.snapshot, 'string');
+    // a spectator joins: everyone gets an update, but the room's state didn't change, so no new backup
+    const watcher = await connect(port);
+    watcher.send({ type: 'hello', token: tok(9), name: 'Watcher', room: first.room.code });
+    await watcher.next((m) => m.type === 'room');
+    await c.next((m) => m.type === 'room' && m.room.members.length === 2);
+    c.send({ type: 'ping' });
+    await c.next((m) => m.type === 'pong');
+    // a real move: one new backup for the player, none for the spectator
+    c.send({ type: 'action', name: 'bankTrade', args: ['ore', 'wood'] });
+    await c.next((m) => m.type === 'room' && !m.refused && m.game.events.at(-1)?.type === 'bank');
+    const second = await c.next((m) => m.type === 'backup');
+    assert.ok(second.version > backup.version);
+    c.send({ type: 'action', name: 'bankTrade', args: ['ore', 'wood'] }); // the same move again at once
+    const repeat = await c.next((m) => m.type === 'room' && m.refused);
+    assert.equal(repeat.refused, true, 'the player hears it was not made');
+    watcher.send({ type: 'ping' });
+    await watcher.next((m) => m.type === 'pong');
+    await assert.rejects(watcher.next((m) => m.type === 'backup'), /no message/, 'spectators get no backups');
+    c.ws.close();
+    watcher.ws.close();
+  } finally {
+    server.wss.clients.forEach((ws) => ws.terminate());
+    await new Promise((r) => server.close(r));
+  }
+});

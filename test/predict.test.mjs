@@ -15,7 +15,7 @@ const SERVER = {
   placeAtVertex: (g, [v]) => R.placeAtVertex(g, v),
   placeAtEdge: (g, [e]) => R.placeAtEdge(g, e),
   endTurn: (g) => R.endTurn(g),
-  bankTrade: (g, [give, get]) => { const p = R.setTrade(g, { give, get }); const t = R.bankTrade(p); return t === p ? g : t; },
+  bankTrade: (g, [give, get]) => R.bankTrade(g, give, get),
   discard: (g, [cards], seat) => (R.mustDiscard(g, seat) ? R.discardCards(g, cards, seat) : g),
   pickResource: (g, [r]) => R.pickResource(g, r),
 };
@@ -54,6 +54,7 @@ function compare(pred, server, seat, label, before) {
 test('predicted moves match the server exactly, and refused moves are never predicted', () => {
   let checked = 0;
   let refused = 0;
+  let heldBack = 0;
   for (const [count, quick] of [[3, false], [4, true], [5, true]]) {
     const room = Rooms.createRoom();
     Rooms.join(room, tok(1), 'Host');
@@ -77,6 +78,14 @@ test('predicted moves match the server exactly, and refused moves are never pred
               continue;
             }
             if (g.mode === 'discard' && name !== 'discard') continue; // only discarding happens in discard mode
+            if (name === 'endTurn' && !pred) {
+              // held back because the next player might win with point cards this seat can't see
+              const next = server.cur;
+              const hidden = view.players[next].dev.filter((c) => c.type === 'hidden').length;
+              assert.ok(R.victoryPoints(view, next, false) + hidden >= R.winTarget(view), 'End Turn is only held back when a hidden win is possible');
+              heldBack++;
+              continue;
+            }
             assert.ok(pred, `${name}(${JSON.stringify(args)}) is certain and should be predicted`);
             compare(pred, server, seat, `${name}(${JSON.stringify(args)})`, g);
             checked++;
@@ -88,6 +97,17 @@ test('predicted moves match the server exactly, and refused moves are never pred
   }
   assert.ok(checked > 300, `checked ${checked} predicted moves`);
   assert.ok(refused > 1000, `checked ${refused} refused moves`);
+});
+
+test('ending your turn waits for the server when the next player could win with hidden point cards', () => {
+  const g = { ...R.createGame({ autoSetup: true, winPoints: 8 }), phase: 'main' };
+  const seat = g.cur;
+  const next = R.endTurn(g).cur;
+  // the next player has 2 points on the board and enough face-down cards to reach 8
+  const hidden = Array.from({ length: 6 }, () => ({ type: 'hidden', turn: 0 }));
+  const view = { ...g, players: g.players.map((pl, i) => (i === next ? { ...pl, dev: hidden } : pl)) };
+  assert.equal(predict(view, seat, 'endTurn', []), null);
+  assert.ok(predict(g, seat, 'endTurn', []), 'with no hidden cards the result is certain');
 });
 
 test('nothing hidden is ever predicted: dice, card draws, steals, Monopoly and player trades wait for the server', () => {

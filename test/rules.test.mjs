@@ -4,6 +4,8 @@ import { GEO } from '../public/js/geometry.js';
 import * as R from '../public/js/rules.js';
 
 // Deterministic random numbers so tests always behave the same way.
+// A trade between players: offered, accepted, then confirmed by the offerer.
+const playerTrade = (g, q, give, get) => R.confirmTrade(R.respondTrade(R.proposeTrade(g, { ...R.emptyRes(), ...give }, { ...R.emptyRes(), ...get }), q, true), q);
 function seeded(seed = 1) {
   let s = seed;
   return () => ((s = (s * 16807) % 2147483647) / 2147483647);
@@ -49,7 +51,7 @@ test('setup runs in snake order and the second settlement pays out', () => {
     }
     g = R.placeAtEdge(g, R.validEdges(g)[0]);
   }
-  assert.deepEqual(order, R.SETUP_ORDER);
+  assert.deepEqual(order, [0, 1, 2, 3, 3, 2, 1, 0], 'snake order');
   assert.equal(g.phase, 'roll');
   assert.equal(g.cur, 0);
 });
@@ -114,9 +116,8 @@ test('bank trades at 4:1 by default', () => {
   let g = R.createGame({ autoSetup: true });
   g = R.resolveRoll(g, [1, 1]);
   g.players[0].res = { wood: 0, brick: 0, wheat: 4, sheep: 0, ore: 0 };
-  g = R.setTrade(g, { give: 'wheat', get: 'ore' });
   const ratio = R.harborRatio(g, 0, 'wheat');
-  g = R.bankTrade(g);
+  g = R.bankTrade(g, 'wheat', 'ore');
   assert.equal(g.players[0].res.ore, 1);
   assert.equal(g.players[0].res.wheat, 4 - ratio);
 });
@@ -181,7 +182,7 @@ for (const kind of ['road', 'settlement', 'city']) {
     const target = kind === 'road' ? R.validEdges(g)[0] : R.validVertices(g)[0];
     assert.notEqual(target, undefined);
     const give = kind === 'city' ? 'wheat' : 'wood';
-    g = R.acceptOffer(R.setTrade(g, { give, get: 'ore', giveN: 1, getN: 1 }), 1);
+    g = playerTrade(g, 1, { [give]: 1 }, { ore: 1 });
     assert.equal(g.mode, null, 'unaffordable pending build is cancelled');
     // Even a stale placement request must be rejected by the rules engine.
     const stale = { ...g, mode: kind };
@@ -196,7 +197,7 @@ test('bank trading cancels a city when it spends the required wheat', () => {
   g.players[0].res = { wood: 0, brick: 0, wheat: 4, sheep: 0, ore: 3 };
   g = R.chooseBuild(g, 'city');
   assert.equal(g.mode, 'city');
-  g = R.bankTrade(R.setTrade(g, { give: 'wheat', get: 'sheep' }));
+  g = R.bankTrade(g, 'wheat', 'sheep');
   assert.equal(g.mode, null);
   assert.equal(g.players[0].res.sheep, 1);
 });
@@ -206,7 +207,7 @@ test('trading preserves an affordable build; Road Building completes before trad
   g.players[0].res = { wood: 1, brick: 1, wheat: 1, sheep: 0, ore: 0 };
   g.players[1].res.ore = 2;
   g = R.chooseBuild(g, 'road');
-  g = R.acceptOffer(R.setTrade(g, { give: 'wheat', get: 'ore' }), 1);
+  g = playerTrade(g, 1, { wheat: 1 }, { ore: 1 });
   assert.equal(g.mode, 'road');
   g = R.placeAtEdge(g, R.validEdges(g)[0]);
   assert.equal(g.players[0].res.wood, 0);
@@ -214,8 +215,7 @@ test('trading preserves an affordable build; Road Building completes before trad
   g.players[0].dev = [{ type: 'roads', turn: 0 }];
   g = R.playDevCard(g, 'roads');
   g.players[1].res.wood = 1;
-  const offer=R.setTrade(g,{give:'ore',get:'wood'});
-  assert.equal(R.acceptOffer(offer,1),offer,'finish the development card effect before another action');
+  assert.equal(R.proposeTrade(g,{ore:1},{wood:1}),g,'finish the development card effect before another action');
   assert.equal(g.players[0].res.wood,0);
   assert.equal(g.mode, 'road');
   const before = structuredClone(g.players[0].res);

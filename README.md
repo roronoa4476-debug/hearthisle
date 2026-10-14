@@ -2,7 +2,7 @@
 
 **[Play Koolkatan](https://koolkatan-sg.onrender.com/)** — create a room and share its link with friends.
 
-Version **0.7.0** adds table animations: cards fly between the board, hands, players and the bank whenever resources are collected, paid, traded, discarded or stolen, with turn banners, award hand-overs and confetti for the winner. It also brings a wooden dice sound, smoother map zoom, people choosing colours before bots, and lighter, faster updates. Version 0.6.0 added computer players, game options, a turn timer, rematches, sound effects and a phone layout.
+Version **0.7.1** is a clean-up for speed: phones redraw less and paint about half as much per move, the server does a move's work about 2.5 times faster and sends about 60% fewer bytes per update, abandoned games stop using the server, a phone that wakes up reconnects by itself, and a handful of small bugs are fixed. Version 0.7.0 added table animations: cards fly between the board, hands, players and the bank whenever resources are collected, paid, traded, discarded or stolen, with turn banners, award hand-overs and confetti for the winner. It also brings a wooden dice sound, smoother map zoom, people choosing colours before bots, and lighter, faster updates. Version 0.6.0 added computer players, game options, a turn timer, rematches, sound effects and a phone layout.
 
 **A Catan-style island board game I built for the browser**, so my friends and I can play together for free.
 
@@ -53,7 +53,7 @@ The game runs as one small Node server, which fits [Render's free plan](https://
 
 Free-plan notes: the server sleeps after 15 minutes with nobody connected, so the first person to open the link may wait up to a minute while it wakes. It stays awake while a game is being played, and a free scheduled GitHub job (`.github/workflows/keep-awake.yml`) visits it every 10 minutes from 08:00 to 02:00 Pakistan time, about 560 of Render's 750 free hours a month. GitHub pauses scheduled jobs in a repository with no activity for 60 days; re-enable it from the Actions tab if that happens.
 
-**Games survive restarts.** Render can restart a free server at any time, and pushing new code restarts it too. After every move the server gives each player's browser a sealed backup of the game (encrypted with a secret only the server knows, so nobody can read or edit it). If the server restarts, everyone's screen reconnects on its own and hands back its backup; the server keeps the newest one and pauses play for a few seconds until everyone is back, then the game continues from the last move. A crash in one message is logged and ignored instead of stopping the server.
+**Games survive restarts.** Render can restart a free server at any time, and pushing new code restarts it too. While a game is played the server gives each player's browser a sealed backup of the game, at most every two seconds and always ending with the latest move (encrypted with a secret only the server knows, so nobody can read or edit it). If the server restarts, everyone's screen reconnects on its own and hands back its backup; the server keeps the newest one and pauses play for a few seconds until everyone is back, then the game continues from the last move. A crash in one message is logged and ignored instead of stopping the server.
 
 ## Run it on your computer
 

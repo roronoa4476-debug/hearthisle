@@ -103,8 +103,8 @@ for(const type of ['any','wood','brick','wheat','sheep','ore'])test(`${type} har
   assert.equal(R.harborRatio(g,1,'wood'),4);
 });
 test('bank rejects empty supply, giveaways, same resource and wrong phases',()=>{
-  let g=blank();hand(g,0,basket({wood:8}));hand(g,1,basket({ore:19}));g=R.setTrade(g,{give:'wood',get:'ore'});assert.equal(R.bankTrade(g),g);
-  g=R.setTrade(g,{give:'wood',get:'wood'});assert.equal(R.bankTrade(g),g);g.phase='roll';assert.equal(R.bankTrade(g),g);
+  let g=blank();hand(g,0,basket({wood:8}));hand(g,1,basket({ore:19}));assert.equal(R.bankTrade(g,'wood','ore'),g);
+  assert.equal(R.bankTrade(g,'wood','wood'),g);g.phase='roll';assert.equal(R.bankTrade(g,'wood','brick'),g);
 });
 test('basket trade needs partner consent then active confirmation, conserves cards and accepts mixed resources',()=>{
   let g=blank();hand(g,0,basket({wood:2,brick:1}));hand(g,1,basket({ore:1,wheat:2}));
@@ -159,7 +159,7 @@ for(const count of [5,6])test(`${count} players: complete paired cycle, restrict
   for(let lead=0;lead<count;lead++){
     assert.equal(g.cur,lead);assert.equal(g.paired,false);assert.equal(g.phase,'roll');g=R.resolveRoll(g,[1,1]);g=R.endTurn(g);
     assert.equal(g.cur,(lead+3)%count);assert.equal(g.paired,true);assert.equal(g.phase,'main');assert.equal(R.startRoll(g),g);assert.equal(R.proposeTrade(g,basket({wood:1}),basket({ore:1})),g);
-    hand(g,g.cur,basket({wood:4,wheat:1,sheep:1,ore:1}));g=R.setTrade(g,{give:'wood',get:'brick'});assert.ok(R.bankTradeOk(g));g=R.bankTrade(g);
+    hand(g,g.cur,basket({wood:4,wheat:1,sheep:1,ore:1}));assert.ok(R.bankTradeOk(g,{give:'wood',get:'brick'}));g=R.bankTrade(g,'wood','brick');
     g.deck.push('monopoly');g=R.buyDevCard(g);assert.equal(R.canPlayDev(g,'monopoly'),false);g=R.endTurn(g);invariant(g);
   }
   assert.equal(g.cur,0);assert.equal(g.phase,'roll');assert.ok(R.canPlayDev(g,'monopoly'),'card bought during player 2 is playable at a later player 1 turn');
@@ -173,7 +173,7 @@ test('a newly purchased hidden point can win immediately; action-only player can
 });
 test('invalid actions are no-ops and valid actions leave input state unchanged',()=>{
   let g=blank();const old=structuredClone(g);assert.equal(R.placeAtEdge(g,999),g);assert.equal(R.placeAtVertex(g,999),g);assert.equal(R.playDevCard(g,'vp'),g);assert.equal(R.pickResource(g,'fake'),g);assert.deepEqual(g,old);
-  hand(g,0,basket({wood:4}));const before=structuredClone(g);const next=R.bankTrade(R.setTrade(g,{give:'wood',get:'ore'}));assert.deepEqual(g,before);assert.notEqual(next,g);invariant(next);
+  hand(g,0,basket({wood:4}));const before=structuredClone(g);const next=R.bankTrade(g,'wood','ore');assert.deepEqual(g,before);assert.notEqual(next,g);invariant(next);
 });
 test('save validation accepts genuine games and rejects old, inconsistent or damaged saves',()=>{
   const g=R.createGame();assert.ok(R.validSavedGame(JSON.parse(JSON.stringify(g))));for(const change of [{schema:1},{playerCount:7},{bank:R.emptyRes()},{terrain:[]},{cur:99}])assert.equal(R.validSavedGame({...g,...change}),false);

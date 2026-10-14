@@ -101,3 +101,63 @@ test('bug: hidden information never leaks through the shared state sent to other
   assert.doesNotMatch(allText(v), /monopoly|knight"/i);
   assert.ok(!('snapshot' in v), 'backups are added by the transport, sealed');
 });
+
+test('bug: a cheater renaming themselves during a restore cannot lock out the newer backup', () => {
+  const room = startedRoom();
+  const old = seal(Rooms.snapshotOf(room));
+  room.game = R.resolveRoll(room.game, [1, 1]);
+  Rooms.act(room, room.seatTokens[room.game.cur], 'endTurn');
+  const newer = seal(Rooms.snapshotOf(room));
+  const newestTurn = room.game.turn;
+  Rooms._rooms.delete(room.code);
+  const a = Rooms.restoreRoom(unseal(old));
+  Rooms.connected(a, tok(1), +1);
+  assert.equal(Rooms.lobby(a, tok(1), { type: 'setName', name: 'Sneaky' }), false, 'no changes while the game is being restored');
+  const b = Rooms.restoreRoom(unseal(newer));
+  assert.equal(b.game.turn, newestTurn, 'the newer backup still wins');
+});
+
+test('bug: an abandoned game with a turn timer does not keep playing itself', () => {
+  const room = Rooms.createRoom();
+  ['Host', 'Ali', 'Sara'].forEach((n, i) => Rooms.join(room, tok(i + 1), n));
+  Rooms.lobby(room, tok(1), { type: 'setOption', quick: true, turnTimer: 60 });
+  Rooms.lobby(room, tok(1), { type: 'start' });
+  assert.equal(Rooms.viewFor(room, tok(1)).room.deadlineIn, null, 'nobody is connected yet');
+  for (const t of room.seatTokens) Rooms.connected(room, t, +1);
+  assert.ok(Rooms.viewFor(room, tok(1)).room.deadlineIn > 0, 'the clock runs while people are here');
+  for (const t of room.seatTokens) Rooms.connected(room, t, -1);
+  assert.equal(Rooms.viewFor(room, tok(1)).room.deadlineIn, null, 'and stops when everyone has left');
+  assert.equal(room.timerKey, null, 'no countdown is waiting to fire');
+  Rooms.connected(room, tok(1), +1);
+  assert.ok(Rooms.viewFor(room, tok(1)).room.deadlineIn > 0, 'someone came back: it runs again');
+});
+
+test('empty lobbies are forgotten after ten minutes; games last longer; long-gone spectators free their place', () => {
+  const lobbyRoom = Rooms.createRoom();
+  Rooms.join(lobbyRoom, tok(70), 'Host');
+  Rooms.join(lobbyRoom, tok(71), 'Watcher');
+  Rooms.lobby(lobbyRoom, tok(70), { type: 'spectate' });
+  Rooms.lobby(lobbyRoom, tok(71), { type: 'spectate' });
+  const game = startedRoom();
+  Rooms.join(game, tok(72), 'Visitor');
+  Rooms.connected(game, tok(1), +1); // someone is still playing
+  Rooms.connected(game, tok(72), +1);
+  Rooms.connected(game, tok(72), -1);
+  const later = Date.now() + 31 * 60 * 1000;
+  Rooms.sweep(later);
+  assert.equal(Rooms.getRoom(lobbyRoom.code), undefined, 'the empty lobby is gone');
+  assert.equal(Rooms.getRoom(game.code), game, 'the game is kept');
+  assert.equal(game.members.has(tok(72)), false, 'the spectator who left half an hour ago is dropped');
+  assert.equal(game.members.has(tok(1)), true, 'players are never dropped');
+});
+
+test('renaming to the same name changes nothing (no update for everyone)', () => {
+  const room = startedRoom();
+  const version = room.version;
+  assert.equal(Rooms.lobby(room, tok(1), { type: 'setName', name: Rooms.viewFor(room, tok(1)).room.you.name }), false);
+  assert.equal(room.version, version);
+  const seats = room.game.seats;
+  assert.equal(Rooms.lobby(room, tok(1), { type: 'setName', name: 'Renamed' }), true);
+  assert.notEqual(room.game.seats, seats, 'the game is replaced, not edited in place');
+  assert.equal(room.game.seats[Rooms.seatOf(room, tok(1))].name, 'Renamed');
+});

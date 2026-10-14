@@ -228,7 +228,7 @@ function bankTradeTowardGoal(g, p) {
   for (const get of R.RES.filter((r) => need[r] > 0 && g.bank[r] > 0)) {
     const give = R.RES.filter((r) => r !== get && spare[r] >= R.harborRatio(g, p, r)).sort((a, b) => spare[b] - R.harborRatio(g, p, b) - (spare[a] - R.harborRatio(g, p, a)))[0];
     if (!give) continue;
-    const next = R.bankTrade(R.setTrade(g, { give, get }));
+    const next = R.bankTrade(g, give, get);
     if (next.players[p].res[get] > g.players[p].res[get]) return next;
   }
   return g;

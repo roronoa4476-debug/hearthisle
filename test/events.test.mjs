@@ -37,6 +37,7 @@ test('rolling: a roll event, then either production that matches the gains or a 
     const done = R.resolveRoll(rolled, dice);
     const fresh = after(rolled, done);
     if (dice[0] + dice[1] === 7) assert.deepEqual(fresh.map((e) => e.type), ['seven']);
+    else if (done.gains.every((gr) => R.totalCards(gr) === 0)) assert.deepEqual(fresh, [], 'a roll that pays nobody has nothing to animate');
     else {
       assert.deepEqual(fresh.map((e) => e.type), ['produce']);
       // every card paid is accounted for exactly once, from a producing tile
@@ -95,7 +96,7 @@ test('illegal moves add no events', () => {
   const g = mainPhase();
   hand(g, g.cur, {});
   // every one of these is refused (unaffordable, wrong phase or mode, not a legal spot)
-  for (const next of [R.chooseBuild(g, 'city'), R.buyDevCard(g), R.bankTrade(g), R.endTurn({ ...g, mode: 'robber' }), R.placeAtEdge(g, 0), R.moveRobber(g, 3), R.startRoll(g)]) {
+  for (const next of [R.chooseBuild(g, 'city'), R.buyDevCard(g), R.bankTrade(g, 'ore', 'wood'), R.endTurn({ ...g, mode: 'robber' }), R.placeAtEdge(g, 0), R.moveRobber(g, 3), R.startRoll(g)]) {
     assert.equal(after(g, next).length, 0);
   }
 });
@@ -137,7 +138,7 @@ test('robber, steal, discards, plenty, monopoly, trades, offers and turns each e
   // bank trade, offer, player trade
   g = mono;
   hand(g, p, { ore: 4 });
-  const bt = R.bankTrade(R.setTrade(g, { give: 'ore', get: 'wood' }));
+  const bt = R.bankTrade(g, 'ore', 'wood');
   const bank = after(g, bt);
   assert.deepEqual(bank.map((e) => e.type), ['bank']);
   assert.deepEqual([bank[0].give.ore, bank[0].get.wood], [R.harborRatio(g, p, 'ore'), 1]);

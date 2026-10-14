@@ -193,6 +193,7 @@ test('the turn timer finishes a late player’s turn and logs it', () => {
   Rooms.join(room, tok(1), 'Host');
   Rooms.join(room, tok(2), 'Ali');
   Rooms.join(room, tok(3), 'Sara');
+  Rooms.connected(room, tok(1), +1); // the clock only runs while someone is there
   Rooms.lobby(room, tok(1), { type: 'setOption', quick: true, turnTimer: 60 });
   Rooms.lobby(room, tok(1), { type: 'start' });
   const view = Rooms.viewFor(room, tok(1)).room;
@@ -209,6 +210,7 @@ test('the turn timer finishes a late player’s turn and logs it', () => {
 test('an old countdown never carries into the next game', () => {
   const room = Rooms.createRoom();
   for (let i = 1; i <= 3; i++) Rooms.join(room, tok(i), `P${i}`);
+  Rooms.connected(room, tok(1), +1);
   Rooms.lobby(room, tok(1), { type: 'setOption', quick: true, turnTimer: 60 });
   Rooms.lobby(room, tok(1), { type: 'start' });
   assert.ok(Rooms.viewFor(room, tok(1)).room.deadlineIn > 0);

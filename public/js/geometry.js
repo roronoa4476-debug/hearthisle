@@ -43,7 +43,6 @@ function buildGeometry(expanded) {
 export const GEO=buildGeometry(false);
 export const EXPANDED_GEO=buildGeometry(true);
 export const getGeometry=count=>count>4?EXPANDED_GEO:GEO;
-export const BOARD_W=GEO.width,BOARD_H=GEO.height;
 export const pctX=(x,geo=GEO)=>(x/geo.width+.5)*100;
 export const pctY=(y,geo=GEO)=>(y/geo.height+.5)*100;
 export const pctW=(n,geo=GEO)=>n/geo.width*100;

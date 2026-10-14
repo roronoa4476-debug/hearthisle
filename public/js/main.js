@@ -86,19 +86,26 @@ const mapView = createMapView({
   reset: document.getElementById('map-reset'),
   label: document.getElementById('map-zoom-label'),
 });
-function fitBoard() {
-  const geo = getGeometry((game || preview).playerCount);
-  mapView.resize(geo.width / geo.height, `${room?.code || 'preview'}|${room?.phase || 'home'}|${(game || preview).playerCount}`);
+// Fitting the map measures the page, which is slow right after a redraw, so it
+// happens only when the table is resized or a different board is shown.
+let fittedKey = null;
+function fitBoard(force = true) {
+  const g = game || preview;
+  const key = `${room?.code || 'preview'}|${room?.phase || 'home'}|${g.playerCount}`;
+  if (!force && key === fittedKey) return;
+  fittedKey = key;
+  const geo = getGeometry(g.playerCount);
+  mapView.resize(geo.width / geo.height, key);
 }
 function draw() {
   let g = game || preview;
   if (g.toast && g.toast.id === ui.toastHidden) g = { ...g, toast: null };
+  ui.timer = timerFace();
   render(g, actions, ui, room);
-  fitBoard();
+  fitBoard(false);
   reattach(); // keep running card/row animations going on the redrawn elements
-  paintTimer?.();
 }
-new ResizeObserver(fitBoard).observe(document.getElementById('table'));
+new ResizeObserver(() => fitBoard()).observe(document.getElementById('table'));
 
 /* ---------- connection ---------- */
 function connect() {
@@ -118,6 +125,7 @@ function connect() {
   });
   socket.addEventListener('message', (event) => {
     if (socket !== ws) return;
+    clearTimeout(timers.alive); // the connection answered
     try {
       onMessage(event);
     } catch (err) {
@@ -145,6 +153,10 @@ function connect() {
       draw();
       return;
     }
+    if (msg.type === 'backup') {
+      saveBackup(msg.code, msg.snapshot, msg.version);
+      return;
+    }
     if (msg.type === 'history') {
       ui.history = Array.isArray(msg.log) ? msg.log : [];
       draw();
@@ -153,7 +165,6 @@ function connect() {
     if (msg.type !== 'room') return;
     retry = 0;
     ui.inviteCode = null;
-    if (msg.snapshot) saveBackup(msg.room.code, msg.snapshot, msg.room.version);
     setBusy(false);
     const hadOffer = !!game?.offer;
     const oldToast = game?.toast?.id;
@@ -195,21 +206,36 @@ function connect() {
   socket.addEventListener('close', () => {
     if (socket !== ws || !wantConnection) return;
     ui.status = 'connecting';
-    showNotice('Connection lost — reconnecting…');
+    draw(); // shows "Connection lost — reconnecting…" over the board
     clearTimeout(timers.retry);
-    timers.retry = setTimeout(connect, Math.min(8000, 600 * 2 ** retry++));
+    // a little randomness so a room's players don't all knock at the same instant after a restart
+    timers.retry = setTimeout(connect, Math.min(8000, 600 * 2 ** retry++) * (0.8 + Math.random() * 0.4));
   });
 }
 // Render's free plan sleeps after 15 minutes without messages *from* players,
 // so every open game sends a tiny keep-alive every 4 minutes.
 setInterval(() => send({ type: 'ping' }), 4 * 60 * 1000);
+// A phone that slept can keep a connection that looks open but is dead. When
+// the page comes back, check it: no answer within a few seconds means reconnect.
+function checkConnection() {
+  if (!wantConnection || document.hidden) return;
+  if (ws?.readyState !== WebSocket.OPEN) {
+    if (ws?.readyState !== WebSocket.CONNECTING) connect();
+    return;
+  }
+  send({ type: 'ping' });
+  clearTimeout(timers.alive);
+  const socket = ws;
+  timers.alive = setTimeout(() => { if (socket === ws) { retry = 0; connect(); } }, 4000);
+}
+document.addEventListener('visibilitychange', checkConnection);
+addEventListener('online', checkConnection);
+addEventListener('pageshow', (event) => { if (event.persisted) checkConnection(); });
 
 function send(msg) {
-  if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
-}
-function showNotice(text) {
-  const n = document.getElementById('notice');
-  if (n) n.textContent = text;
+  if (ws?.readyState !== WebSocket.OPEN) return false;
+  ws.send(JSON.stringify(msg));
+  return true;
 }
 // One move at a time: after sending a move, ignore extra clicks until the
 // server answers (stops an accidental double-click trading twice).
@@ -220,8 +246,9 @@ function setBusy(on) {
 }
 function sendAction(name, args) {
   if (document.body.classList.contains('busy')) return;
+  // offline: don't pretend the move happened
+  if (!send({ type: 'action', name, args })) return checkConnection();
   setBusy(true);
-  send({ type: 'action', name, args });
   // show your own move at once when its result is certain; the server's update follows
   const guess = predict(game, mySeat(), name, args);
   if (guess) showPredicted(guess);
@@ -240,13 +267,18 @@ const act = (name) => (...args) => sendAction(name, args);
 
 // Keep only this room's backup, and never replace a newer backup with an
 // older one (e.g. while the server is still restoring from someone else's).
+let backupRoom = null;
 function saveBackup(code, snapshot, version) {
-  try {
-    for (let i = localStorage.length - 1; i >= 0; i--) {
-      const key = localStorage.key(i);
-      if (key?.startsWith('hearthisle-snap-') && key !== `hearthisle-snap-${code}` && key !== `hearthisle-snapv-${code}`) localStorage.removeItem(key);
-    }
-  } catch {}
+  if (typeof code !== 'string' || typeof snapshot !== 'string') return;
+  if (backupRoom !== code) {
+    backupRoom = code;
+    try {
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const key = localStorage.key(i);
+        if (key?.startsWith('hearthisle-snap-') && key !== `hearthisle-snap-${code}` && key !== `hearthisle-snapv-${code}`) localStorage.removeItem(key);
+      }
+    } catch {}
+  }
   const stored = Number(store.get(`hearthisle-snapv-${code}`) || -1);
   if (Number.isInteger(version) && version < stored) return;
   store.set(`hearthisle-snap-${code}`, snapshot);
@@ -261,19 +293,25 @@ function timerSeats() {
   if (!game || game.winner !== null) return [];
   return game.mode === 'discard' ? game.discards.map((d) => d.p) : [game.cur];
 }
+/** What the turn timer shows now: { text, urgent, left }, or null when there's no timer. */
+function timerFace() {
+  if (!ui.deadline || !game) return null;
+  const left = Math.max(0, Math.ceil((ui.deadline - Date.now()) / 1000));
+  return { text: `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`, urgent: left <= 10, left };
+}
+// Between updates only the timer itself changes, so it is updated directly,
+// and only when the shown second changes.
 let lastTick = null;
 function paintTimer() {
+  const face = timerFace();
   const el = document.getElementById('turn-timer');
-  if (!ui.deadline || !game) {
-    if (el) el.hidden = true;
-    return;
+  if (el && (face?.text ?? '') !== (ui.timer?.text ?? '')) {
+    el.hidden = !face;
+    el.textContent = face?.text ?? '';
+    el.classList.toggle('urgent', !!face?.urgent);
   }
-  const left = Math.max(0, Math.ceil((ui.deadline - Date.now()) / 1000));
-  if (el) {
-    el.hidden = false;
-    el.textContent = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
-    el.classList.toggle('urgent', left <= 10);
-  }
+  ui.timer = face;
+  const left = face?.left ?? null;
   if (left <= 10 && left > 0 && left !== lastTick && timerSeats().includes(mySeat())) sound.play('tick');
   lastTick = left;
 }
@@ -287,7 +325,7 @@ const actions = {
     draw();
   },
   draft(patch) {
-    // Typing shouldn't redraw on every key, except to enable buttons.
+    // Typing redraws so buttons that need a name or code turn on; the text box itself is kept as it is.
     Object.assign(ui, patch);
     draw();
   },

@@ -14,14 +14,15 @@ const PREDICTABLE = {
   placeAtVertex: (g, [vid]) => R.placeAtVertex(g, vid),
   placeAtEdge: (g, [eid]) => R.placeAtEdge(g, eid),
   endTurn: (g) => R.endTurn(g),
-  bankTrade: (g, [give, get]) => {
-    const prepared = R.setTrade(g, { give, get });
-    const traded = R.bankTrade(prepared);
-    return traded === prepared ? g : traded;
-  },
+  bankTrade: (g, [give, get]) => R.bankTrade(g, give, get),
   discard: (g, [cards], seat) => R.discardCards(g, cards, seat),
   pickResource: (g, [res]) => (g.mode === 'plenty' ? R.pickResource(g, res) : g), // Monopoly takes hidden cards
 };
+
+function hiddenWinPossible(g, p) {
+  const hidden = g.players[p].dev.filter((c) => c.type === 'hidden').length;
+  return R.victoryPoints(g, p, false) + hidden >= R.winTarget(g);
+}
 
 /**
  * The table as it will be after your move, or null when the move can't be
@@ -30,7 +31,9 @@ const PREDICTABLE = {
 export function predict(g, seat, name, args = []) {
   const rule = PREDICTABLE[name];
   if (!rule || !g || seat === null || seat < 0 || g.winner !== null || g.rolling) return null;
-  if (name === 'discard' ? !R.mustDiscard(g, seat) : g.cur !== seat || g.mode === 'discard') return null;
+  if (name === 'discard') {
+    if (!R.mustDiscard(g, seat)) return null;
+  } else if (g.cur !== seat || g.mode === 'discard') return null;
   let next;
   try {
     next = rule(g, args, seat);
@@ -38,6 +41,9 @@ export function predict(g, seat, name, args = []) {
     return null;
   }
   if (!next || next === g) return null;
+  // Ending your turn can hand the win to the next player through point cards
+  // only they can see. If that could happen, wait for the server.
+  if (name === 'endTurn' && next.cur !== seat && hiddenWinPossible(next, next.cur)) return null;
   // keep the view's own conventions: your card count and your private notices
   const players = next.players.map((pl, i) => (i === seat ? { ...pl, cardCount: R.totalCards(pl.res) } : pl));
   return { ...next, players, toast: R.noticeFor(next.toast, seat) };

@@ -203,7 +203,7 @@ h1, h2, h3, p { margin: 0; }
 #board { position: absolute; left: 50%; top: 50%; container-type: inline-size; transform-origin: center; }
 #map-viewport.zoomed { cursor: grab; }
 #map-viewport.moving #board { will-change: transform; }
-#map-viewport.moving .robber, #map-viewport.moving .tile { transition: none; }
+#map-viewport.moving .robber { transition: none; }
 #map-viewport.dragging { cursor: grabbing; user-select: none; }
 .map-controls {
   position: absolute; z-index: 4; bottom: 10px; left: 10px; display: flex; align-items: center; gap: 3px;
@@ -221,11 +221,15 @@ h1, h2, h3, p { margin: 0; }
 .layer > button, .layer > .stop { pointer-events: auto; }
 .surf, .shore, .tile, .target { width: var(--hex-w); height: var(--hex-h); clip-path: var(--hex); transform: translate(-50%, -50%); }
 .surf { transform: translate(-50%, -50%) scale(1.28); background: rgba(220, 245, 255, 0.4); }
-.shore { transform: translate(-50%, -50%) scale(1.16); background: #f6e2b0; box-shadow: inset 0 0 0 100px rgba(255, 255, 255, 0); }
-.tile { background: #fff6dc; filter: drop-shadow(0 calc(var(--u) * 0.05) calc(var(--u) * 0.04) rgba(60, 40, 10, 0.35)); transition: background 0.3s; }
-.tile-art { position: absolute; inset: 3% 3.5%; clip-path: var(--hex); background-size: cover; background-position: center; transition: filter 0.3s; }
-.tile.prod { background: #ffd34a; }
-.tile.prod .tile-art { filter: brightness(1.12) saturate(1.1); }
+.shore { transform: translate(-50%, -50%) scale(1.16); background: #f6e2b0; }
+/* A producing tile lights up: its rim turns gold and its picture brightens.
+   Both are overlays that only fade (cheap on phones), not colour or filter changes. */
+.tile { background: #fff6dc; }
+.tile::before, .tile-art::after { content: ''; position: absolute; inset: 0; opacity: 0; transition: opacity 0.3s; }
+.tile::before { background: #ffd34a; }
+.tile-art::after { background: rgba(255, 244, 200, 0.2); }
+.tile.prod::before, .tile.prod .tile-art::after { opacity: 1; }
+.tile-art { position: absolute; inset: 3% 3.5%; clip-path: var(--hex); background-size: cover; background-position: center; }
 .tile-badge {
   position: absolute; left: 50%; bottom: 9%; transform: translateX(-50%);
   width: calc(var(--u) * 0.4); height: calc(var(--u) * 0.4); border-radius: 50%;
@@ -236,7 +240,7 @@ h1, h2, h3, p { margin: 0; }
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: calc(var(--u) * 0.02);
   background: radial-gradient(circle at 40% 32%, #fffef6, #fbefd2 70%, #ecd5a6);
   box-shadow: 0 0 0 calc(var(--u) * 0.035) #8a5a2c, 0 calc(var(--u) * 0.05) calc(var(--u) * 0.06) rgba(40, 20, 0, 0.45), inset 0 0 0 calc(var(--u) * 0.04) #fff;
-  color: #2b1a0c; transition: opacity 0.25s, filter 0.25s;
+  color: #2b1a0c; transition: opacity 0.25s;
 }
 .token b { font-family: var(--font-display); font-weight: 400; font-size: calc(var(--u) * 0.4); line-height: 0.95; }
 .token.hot { color: #d42a1e; }
@@ -397,7 +401,7 @@ h1, h2, h3, p { margin: 0; }
 .buy .btn { flex: 1; }
 .buy .cost .icon { width: 17px; height: 17px; }
 /* Keep every owned type visible, including small five-type hands. */
-.dev-list { display: grid; gap: 2px; }
+.dev-list { display: grid; gap: 2px; flex-shrink: 0; align-content: start; } /* natural height, not squashed by the panel */
 .dev-card {
   display: grid; grid-template-columns: 30px minmax(0, 1fr) 44px; align-items: center; gap: 4px;
   min-width: 0; padding: 2px 0; border-bottom: 1px solid #ddcfb3;
@@ -415,7 +419,7 @@ h1, h2, h3, p { margin: 0; }
 
 /* ---------- modals ---------- */
 .shade { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; background: rgba(60, 34, 12, 0.42); }
-.modal { width: min(460px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow: auto; padding: 18px 20px 20px; display: flex; flex-direction: column; gap: 12px; }
+.modal { width: min(520px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow: auto; padding: 18px 20px 20px; display: flex; flex-direction: column; gap: 12px; }
 .modal-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .modal h2 { font-family: var(--font-display); font-weight: 400; font-size: 24px; color: #3b2412; text-shadow: 0 1px 0 rgba(255, 246, 225, 0.8); }
 .modal p { font-size: 14px; font-weight: 700; line-height: 1.45; }
@@ -440,7 +444,7 @@ h1, h2, h3, p { margin: 0; }
 @keyframes tumble { 0% { transform: rotate(-30deg) translateY(-8px); } 40% { transform: rotate(14deg) translateY(2px); } 70% { transform: rotate(-6deg); } 100% { transform: none; } }
 @media (prefers-reduced-motion: reduce) {
   .piece, .road, #notice, .dice.rolling .die { animation: none; }
-  .robber, .tile-art, .token, .tile { transition: none; }
+  .robber, .token, .tile::before, .tile-art::after { transition: none; }
 }
 
 /* Smaller laptops (down to 1280x720): tighten spacing, keep everything visible. */
@@ -520,7 +524,6 @@ input[type='text']:focus { outline: none; box-shadow: inset 0 1px 3px rgba(110, 
 .spectate-row small { font-size: 12px; font-weight: 800; color: var(--ink-soft); }
 .host-box { display: flex; flex-direction: column; gap: 8px; padding-top: 4px; border-top: 1px solid rgba(110, 62, 24, 0.3); }
 .center { text-align: center; }
-.modal { width: min(520px, calc(100vw - 32px)); }
 
 /* ---------- lobby: people list for the host ---------- */
 .people { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
@@ -531,8 +534,6 @@ input[type='text']:focus { outline: none; box-shadow: inset 0 1px 3px rgba(110, 
 .person .remove:hover { background: #fde3df; }
 /* while a move is on its way to the server, ignore extra clicks */
 body.busy #board .layer button, body.busy #dock button, body.busy #right button { pointer-events: none; }
-/* dev cards keep their natural height instead of being squashed by the panel */
-.dev-list { flex-shrink: 0; align-content: start; }
 
 /* ---------- mid-game seat controls ---------- */
 .seat-btn {
@@ -620,7 +621,8 @@ body.busy #board .layer button, body.busy #dock button, body.busy #right button 
 }
 
 /* ---------- table animations (fx.js) ---------- */
-.fx-layer { position: fixed; inset: 0; pointer-events: none; overflow: hidden; }
+.svg-defs { position: absolute; width: 0; height: 0; overflow: hidden; } /* shared clip shapes for the pieces (pieces.js) */
+.fx-layer { position: fixed; inset: 0; pointer-events: none; overflow: hidden; contain: strict; }
 #fx { z-index: 30; }
 #fx-top { z-index: 40; } /* confetti stays bright above dialogs */
 .fx-layer > * { position: absolute; left: 0; top: 0; }
@@ -637,4 +639,3 @@ body.busy #board .layer button, body.busy #dock button, body.busy #right button 
 .fx-banner.danger { color: #fff; background: var(--danger); box-shadow: 0 10px 30px rgba(90, 20, 10, 0.4); }
 .fx-confetti { width: 8px; height: 12px; border-radius: 2px; }
 .fx-badge { white-space: nowrap; box-shadow: inset 0 0 0 1px #d4a12c, 0 6px 14px rgba(40, 20, 0, 0.3); }
-.fx-halo { pointer-events: none; }
